@@ -1,5 +1,6 @@
 export interface OpenCloudConfig {
   apiKey?: string;
+  cookie?: string;
   baseUrl?: string;
   timeout?: number;
 }
@@ -74,17 +75,19 @@ export interface ThumbnailResponse {
 
 export class OpenCloudClient {
   private apiKey: string;
+  private cookie: string;
   private baseUrl: string;
   private timeout: number;
 
   constructor(config: OpenCloudConfig = {}) {
     this.apiKey = config.apiKey || process.env.ROBLOX_OPEN_CLOUD_API_KEY || '';
+    this.cookie = config.cookie || process.env.ROBLOX_COOKIE || '';
     this.baseUrl = config.baseUrl || 'https://apis.roblox.com';
     this.timeout = config.timeout || 30000;
   }
 
-  hasApiKey(): boolean {
-    return !!this.apiKey;
+  hasAuth(): boolean {
+    return !!this.apiKey || !!this.cookie;
   }
 
   private async request<T>(
@@ -93,17 +96,19 @@ export class OpenCloudClient {
       method?: string;
       params?: Record<string, string | number | boolean | undefined>;
       body?: unknown;
+      headers?: Record<string, string>;
+      useCookie?: boolean;
     } = {}
   ): Promise<T> {
-    if (!this.apiKey) {
+    const { method = 'GET', params, body, headers = {}, useCookie = false } = options;
+
+    if (!this.apiKey && !this.cookie) {
       throw new Error(
-        'Open Cloud API key not configured. Set ROBLOX_OPEN_CLOUD_API_KEY environment variable.'
+        'Authentication not configured. Set ROBLOX_OPEN_CLOUD_API_KEY or ROBLOX_COOKIE environment variable.'
       );
     }
 
-    const { method = 'GET', params, body } = options;
-
-    const url = new URL(`${this.baseUrl}${endpoint}`);
+    const url = new URL(endpoint.startsWith('http') ? endpoint : `${this.baseUrl}${endpoint}`);
     if (params) {
       for (const [key, value] of Object.entries(params)) {
         if (value !== undefined) {
@@ -112,17 +117,25 @@ export class OpenCloudClient {
       }
     }
 
+    const finalHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...headers,
+    };
+
+    if (this.apiKey && !useCookie) {
+      finalHeaders['x-api-key'] = this.apiKey;
+    } else if (this.cookie) {
+      finalHeaders['Cookie'] = `.ROBLOSECURITY=${this.cookie}`;
+    }
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
       const response = await fetch(url.toString(), {
         method,
-        headers: {
-          'x-api-key': this.apiKey,
-          'Content-Type': 'application/json',
-        },
-        body: body ? JSON.stringify(body) : undefined,
+        headers: finalHeaders,
+        body: body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined,
         signal: controller.signal,
       });
 
@@ -139,13 +152,13 @@ export class OpenCloudClient {
         }
 
         if (response.status === 401) {
-          throw new Error('Invalid or expired API key');
+          throw new Error('Invalid or expired Authentication (API key or Cookie)');
         } else if (response.status === 403) {
-          throw new Error(`API key lacks required permissions: ${errorMessage}`);
+          throw new Error(`Authentication lacks required permissions: ${errorMessage}`);
         } else if (response.status === 429) {
           throw new Error('Rate limit exceeded. Please try again later.');
         } else {
-          throw new Error(`Open Cloud API error (${response.status}): ${errorMessage}`);
+          throw new Error(`Roblox API error (${response.status}): ${errorMessage}`);
         }
       }
 
@@ -180,7 +193,62 @@ export class OpenCloudClient {
   }
 
   async getAssetDetails(assetId: number): Promise<CreatorStoreAsset> {
-    return this.request<CreatorStoreAsset>(`/toolbox-service/v2/assets/${assetId}`);
+    if (this.apiKey) {
+      return this.request<CreatorStoreAsset>(`/toolbox-service/v2/assets/${assetId}`);
+    } else {
+      const data = await this.request<any>(`https://economy.roblox.com/v2/assets/${assetId}/details`, { useCookie: true });
+      return {
+        asset: {
+          id: data.AssetId,
+          name: data.Name,
+          description: data.Description,
+          assetTypeId: data.AssetTypeId,
+          createTime: data.Created,
+          updateTime: data.Updated,
+        },
+        creator: {
+          userId: data.Creator.CreatorTargetId,
+          name: data.Creator.Name,
+          verified: data.Creator.HasVerifiedBadge,
+        }
+      };
+    }
+  }
+
+  async uploadDecal(fileBuffer: Buffer, assetName: string, description: string): Promise<{ assetId: number }> {
+    if (!this.cookie) {
+      throw new Error('upload_decal requires ROBLOX_COOKIE for authentication.');
+    }
+
+    const csrfRes = await fetch('https://auth.roblox.com/v2/logout', {
+      method: 'POST',
+      headers: { 'Cookie': `.ROBLOSECURITY=${this.cookie}` }
+    });
+    const csrfToken = csrfRes.headers.get('x-csrf-token');
+    if (!csrfToken) throw new Error('Failed to get CSRF token for upload');
+
+    const formData = new FormData();
+    const blob = new Blob([new Uint8Array(fileBuffer)], { type: 'image/png' });
+    formData.append('file', blob, 'decal.png');
+    formData.append('assetName', assetName);
+    formData.append('description', description);
+    formData.append('assetTypeId', '13'); 
+    
+    const response = await fetch('https://publish.roblox.com/v1/assets/upload', {
+      method: 'POST',
+      headers: {
+        'Cookie': `.ROBLOSECURITY=${this.cookie}`,
+        'x-csrf-token': csrfToken,
+      },
+      body: formData as any,
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`Upload failed: ${err}`);
+    }
+
+    return (await response.json()) as { assetId: number };
   }
 
   async getAssetThumbnail(

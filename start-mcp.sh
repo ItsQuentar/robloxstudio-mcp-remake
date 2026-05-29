@@ -7,4 +7,4 @@ else
 fi
 
 echo "Starting Roblox MCP Server..."
-npx -y robloxstudio-mcp@latest
+npx -y robloxstudio-mcp-remake@latest

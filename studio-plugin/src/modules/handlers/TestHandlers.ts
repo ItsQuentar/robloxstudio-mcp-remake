@@ -1,4 +1,5 @@
 import { LogService } from "@rbxts/services";
+import Utils from "../Utils";
 
 const StudioTestService = game.GetService("StudioTestService");
 const ServerScriptService = game.GetService("ServerScriptService");
@@ -137,10 +138,6 @@ function getPlaytestOutput(_requestData: Record<string, unknown>) {
 
 function runTests(data: Record<string, unknown>): unknown {
 	const action = data.action as string;
-	const Utils = require(script.Parent!.Parent!.WaitForChild("Utils") as ModuleScript) as unknown as {
-		getInstanceByPath(path: string): Instance | undefined;
-		readScriptSource(inst: Instance): string;
-	};
 
 	if (action === "run_script_test") {
 		const path = data.script_path as string;
@@ -170,9 +167,102 @@ function runTests(data: Record<string, unknown>): unknown {
 	return { error: `Unknown action: ${action}` };
 }
 
+function characterNavigation(requestData: Record<string, unknown>) {
+	const action = requestData.action as string;
+	const targetPath = requestData.target_path as string;
+	const destination = requestData.destination as { x: number; y: number; z: number };
+
+	const instance = Utils.getInstanceByPath(targetPath);
+	if (!instance) return { error: `Target not found: ${targetPath}` };
+
+	const humanoid = instance.IsA("Humanoid") ? instance : instance.FindFirstChildOfClass("Humanoid");
+	if (!humanoid) return { error: "Humanoid not found in target" };
+
+	if (action === "move_to" && destination) {
+		humanoid.MoveTo(new Vector3(destination.x, destination.y, destination.z));
+		return { success: true, message: `Moving to ${destination.x}, ${destination.y}, ${destination.z}` };
+	} else if (action === "jump") {
+		humanoid.Jump = true;
+		return { success: true };
+	} else if (action === "sit") {
+		humanoid.Sit = true;
+		return { success: true };
+	} else if (action === "get_status") {
+		return {
+			success: true,
+			health: humanoid.Health,
+			maxHealth: humanoid.MaxHealth,
+			moveDirection: { x: humanoid.MoveDirection.X, y: humanoid.MoveDirection.Y, z: humanoid.MoveDirection.Z },
+			walkSpeed: humanoid.WalkSpeed,
+			floorMaterial: tostring(humanoid.FloorMaterial),
+		};
+	}
+
+	return { error: `Unknown action: ${action}` };
+}
+
+interface VirtualInputManagerService {
+	SendMouseButtonEvent(x: number, y: number, mouseButton: number, isDown: boolean, game: unknown, processed: number): void;
+	SendMouseMoveEvent(x: number, y: number, game: unknown): void;
+	SendMouseWheelEvent(x: number, y: number, forward: boolean, game: unknown): void;
+	SendKeyEvent(isDown: boolean, keyCode: Enum.KeyCode, processed: boolean, game: unknown): void;
+}
+
+function simulateMouseInput(requestData: Record<string, unknown>) {
+	const VirtualInputManager = game.GetService("VirtualInputManager" as never) as unknown as VirtualInputManagerService;
+	const action = requestData.action as string;
+	const position = (requestData.position as { x: number; y: number }) || { x: 0, y: 0 };
+	const button = (requestData.button as string) || "Left";
+	const delta = (requestData.delta as number) || 0;
+
+	const mouseButton = button === "Left" ? Enum.UserInputType.MouseButton1 :
+		button === "Right" ? Enum.UserInputType.MouseButton2 :
+		Enum.UserInputType.MouseButton3;
+
+	if (action === "click") {
+		VirtualInputManager.SendMouseButtonEvent(position.x, position.y, mouseButton.Value, true, game, 0);
+		task.wait(0.05);
+		VirtualInputManager.SendMouseButtonEvent(position.x, position.y, mouseButton.Value, false, game, 0);
+	} else if (action === "move") {
+		VirtualInputManager.SendMouseMoveEvent(position.x, position.y, game);
+	} else if (action === "button_down") {
+		VirtualInputManager.SendMouseButtonEvent(position.x, position.y, mouseButton.Value, true, game, 0);
+	} else if (action === "button_up") {
+		VirtualInputManager.SendMouseButtonEvent(position.x, position.y, mouseButton.Value, false, game, 0);
+	} else if (action === "scroll") {
+		VirtualInputManager.SendMouseWheelEvent(position.x, position.y, delta > 0, game);
+	}
+
+	return { success: true };
+}
+
+function simulateKeyboardInput(requestData: Record<string, unknown>) {
+	const VirtualInputManager = game.GetService("VirtualInputManager" as never) as unknown as VirtualInputManagerService;
+	const action = requestData.action as string;
+	const key = requestData.key as string;
+
+	const keyCode = Enum.KeyCode.GetEnumItems().find((k) => k.Name === key) as Enum.KeyCode;
+	if (!keyCode) return { error: `Invalid key: ${key}` };
+
+	if (action === "type") {
+		VirtualInputManager.SendKeyEvent(true, keyCode, false, game);
+		task.wait(0.05);
+		VirtualInputManager.SendKeyEvent(false, keyCode, false, game);
+	} else if (action === "key_down") {
+		VirtualInputManager.SendKeyEvent(true, keyCode, false, game);
+	} else if (action === "key_up") {
+		VirtualInputManager.SendKeyEvent(false, keyCode, false, game);
+	}
+
+	return { success: true };
+}
+
 export = {
 	startPlaytest,
 	stopPlaytest,
 	getPlaytestOutput,
 	runTests,
+	characterNavigation,
+	simulateMouseInput,
+	simulateKeyboardInput,
 };

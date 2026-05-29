@@ -5,7 +5,7 @@ import Recording from "../Recording";
 const ChangeHistoryService = game.GetService("ChangeHistoryService");
 const Selection = game.GetService("Selection");
 
-const { getInstancePath, getInstanceByPath } = Utils;
+const { getInstancePath, getInstanceByPath, readScriptSource } = Utils;
 const { beginRecording, finishRecording } = Recording;
 
 function serializeValue(value: unknown): unknown {
@@ -549,7 +549,7 @@ function manageBackups(data: Record<string, unknown>): unknown {
 				children: inst.GetChildren().map((c) => serialize(c)),
 			};
 			if (inst.IsA("LuaSourceContainer")) {
-				info.source = (inst as unknown as { Source: string }).Source;
+				info.source = readScriptSource(inst);
 			}
 			return info;
 		};

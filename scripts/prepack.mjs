@@ -5,7 +5,7 @@
  * Run from a publishable package directory via its "prepack" script.
  */
 
-import { cpSync, existsSync } from 'fs';
+import { cpSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -21,8 +21,18 @@ if (!existsSync(source)) {
 
 if (existsSync(dest)) {
   console.log('studio-plugin/ already exists in package, skipping copy');
-  process.exit(0);
+} else {
+  console.log(`Copying studio-plugin/ into ${packageDir}`);
+  cpSync(source, dest, { recursive: true });
 }
 
-console.log(`Copying studio-plugin/ into ${packageDir}`);
-cpSync(source, dest, { recursive: true });
+// Copy dashboard.html -> dist/roblox-mcp-dashboard.html if this package has it
+const dashSrc = join(packageDir, 'src', 'dashboard.html');
+const dashDest = join(packageDir, 'dist', 'roblox-mcp-dashboard.html');
+if (existsSync(dashSrc)) {
+  console.log(`Copying dashboard.html to dist/roblox-mcp-dashboard.html`);
+  if (!existsSync(join(packageDir, 'dist'))) {
+    mkdirSync(join(packageDir, 'dist'), { recursive: true });
+  }
+  cpSync(dashSrc, dashDest);
+}

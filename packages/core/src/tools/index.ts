@@ -20,6 +20,10 @@ export class RobloxStudioTools {
     this.openCloudClient = new OpenCloudClient();
   }
 
+  setDataModel(dataModel: string | undefined) {
+    this.client.setDataModel(dataModel);
+  }
+
 
   async getFileTree(path: string = '') {
     const response = await this.client.request('/api/file-tree', { path });
@@ -338,65 +342,11 @@ export class RobloxStudioTools {
   }
 
 
-  async setCalculatedProperty(
-    paths: string[],
-    propertyName: string,
-    formula: string,
-    variables?: Record<string, any>
-  ) {
-    if (!paths || paths.length === 0 || !propertyName || !formula) {
-      throw new Error('Paths, property name, and formula are required for set_calculated_property');
-    }
-    const response = await this.client.request('/api/set-calculated-property', {
-      paths,
-      propertyName,
-      formula,
-      variables
-    });
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(response)
-        }
-      ]
-    };
-  }
-
-
-  async setRelativeProperty(
-    paths: string[],
-    propertyName: string,
-    operation: 'add' | 'multiply' | 'divide' | 'subtract' | 'power',
-    value: any,
-    component?: 'X' | 'Y' | 'Z' | 'XScale' | 'XOffset' | 'YScale' | 'YOffset'
-  ) {
-    if (!paths || paths.length === 0 || !propertyName || !operation || value === undefined) {
-      throw new Error('Paths, property name, operation, and value are required for set_relative_property');
-    }
-    const response = await this.client.request('/api/set-relative-property', {
-      paths,
-      propertyName,
-      operation,
-      value,
-      component
-    });
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(response)
-        }
-      ]
-    };
-  }
-
-
-  async getScriptSource(instancePath: string, startLine?: number, endLine?: number) {
+  async getScriptSource(instancePath: string, startLine?: number, endLine?: number, dataModel?: string) {
     if (!instancePath) {
       throw new Error('Instance path is required for get_script_source');
     }
-    const response = await this.client.request('/api/get-script-source', { instancePath, startLine, endLine });
+    const response = await this.client.request('/api/get-script-source', { instancePath, startLine, endLine, dataModel });
     return {
       content: [
         {
@@ -407,11 +357,11 @@ export class RobloxStudioTools {
     };
   }
 
-  async setScriptSource(instancePath: string, source: string) {
+  async setScriptSource(instancePath: string, source: string, dataModel?: string) {
     if (!instancePath || typeof source !== 'string') {
       throw new Error('Instance path and source code string are required for set_script_source');
     }
-    const response = await this.client.request('/api/set-script-source', { instancePath, source });
+    const response = await this.client.request('/api/set-script-source', { instancePath, source, dataModel });
     return {
       content: [
         {
@@ -423,11 +373,11 @@ export class RobloxStudioTools {
   }
 
 
-  async editScriptLines(instancePath: string, startLine: number, endLine: number, newContent: string) {
-    if (!instancePath || !startLine || !endLine || typeof newContent !== 'string') {
-      throw new Error('Instance path, startLine, endLine, and newContent are required for edit_script_lines');
+  async editScriptLines(instancePath: string, old_string: string, new_string: string, dataModel?: string) {
+    if (!instancePath || old_string === undefined || new_string === undefined) {
+      throw new Error('Instance path, old_string, and new_string are required for edit_script_lines');
     }
-    const response = await this.client.request('/api/edit-script-lines', { instancePath, startLine, endLine, newContent });
+    const response = await this.client.request('/api/edit-script-lines', { instancePath, old_string, new_string, dataModel });
     return {
       content: [
         {
@@ -632,19 +582,31 @@ export class RobloxStudioTools {
     };
   }
 
-  async executeLuau(code: string) {
+  async executeLuau(code: string, timeoutMs: number = 120000) {
     if (!code) {
       throw new Error('Code is required for execute_luau');
     }
-    const response = await this.client.request('/api/execute-luau', { code });
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(response)
-        }
-      ]
-    };
+
+    // Retry logic: try up to 2 times with increasing timeout
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const currentTimeout = attempt === 0 ? timeoutMs : timeoutMs * 2;
+        const response = await this.client.request('/api/execute-luau', { code }, currentTimeout);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(response)
+          }]
+        };
+      } catch (err: any) {
+        lastError = err;
+        if (!err.message?.includes('timeout') || attempt === 1) throw err;
+        // Wait 500ms before retry on timeout
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+    throw lastError;
   }
 
   async startPlaytest(mode: string) {
@@ -1184,11 +1146,11 @@ export class RobloxStudioTools {
     sortBy?: string,
     verifiedCreatorsOnly?: boolean
   ) {
-    if (!this.openCloudClient.hasApiKey()) {
+    if (!this.openCloudClient.hasAuth()) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({ error: 'ROBLOX_OPEN_CLOUD_API_KEY environment variable is not set. Set it to use Creator Store asset tools.' })
+          text: JSON.stringify({ error: 'Authentication (ROBLOX_OPEN_CLOUD_API_KEY or ROBLOX_COOKIE) is not set. Set it to use asset tools.' })
         }]
       };
     }
@@ -1213,11 +1175,11 @@ export class RobloxStudioTools {
     if (!assetId) {
       throw new Error('Asset ID is required for get_asset_details');
     }
-    if (!this.openCloudClient.hasApiKey()) {
+    if (!this.openCloudClient.hasAuth()) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({ error: 'ROBLOX_OPEN_CLOUD_API_KEY environment variable is not set. Set it to use Creator Store asset tools.' })
+          text: JSON.stringify({ error: 'Authentication (ROBLOX_OPEN_CLOUD_API_KEY or ROBLOX_COOKIE) is not set. Set it to use asset tools.' })
         }]
       };
     }
@@ -1235,11 +1197,11 @@ export class RobloxStudioTools {
     if (!assetId) {
       throw new Error('Asset ID is required for get_asset_thumbnail');
     }
-    if (!this.openCloudClient.hasApiKey()) {
+    if (!this.openCloudClient.hasAuth()) {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({ error: 'ROBLOX_OPEN_CLOUD_API_KEY environment variable is not set. Set it to use Creator Store asset tools.' })
+          text: JSON.stringify({ error: 'Authentication (ROBLOX_OPEN_CLOUD_API_KEY or ROBLOX_COOKIE) is not set. Set it to use asset tools.' })
         }]
       };
     }
@@ -1355,7 +1317,7 @@ export class RobloxStudioTools {
 
   async insertAssetV2(params: any) {
     if (params.action === 'search_and_insert') {
-      if (!this.openCloudClient.hasApiKey()) {
+      if (!this.openCloudClient.hasAuth()) {
         throw new Error('ROBLOX_OPEN_CLOUD_API_KEY is required for search_and_insert');
       }
       const searchResponse = await this.openCloudClient.searchAssets({
@@ -1492,11 +1454,6 @@ export class RobloxStudioTools {
     return { content: [{ type: 'text', text: JSON.stringify(response) }] };
   }
 
-  async managePlaces(params: any) {
-    const response = await this.client.request('/api/manage-places', params);
-    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
-  }
-
   async monitorRemotes(params: any) {
     const response = await this.client.request('/api/monitor-remotes', params);
     return { content: [{ type: 'text', text: JSON.stringify(response) }] };
@@ -1585,5 +1542,807 @@ export class RobloxStudioTools {
   async buildContext(params: any) {
     const response = await this.client.request('/api/build-context', params);
     return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+  }
+
+  async uploadDecal(filePath: string, assetName: string, description: string = '') {
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+    const fileBuffer = fs.readFileSync(filePath);
+    const response = await this.openCloudClient.uploadDecal(fileBuffer, assetName, description);
+    return {
+      content: [{
+        type: 'text',
+        text: `Successfully uploaded decal: ${assetName} (ID: ${response.assetId})`
+      }]
+    };
+  }
+
+  async simulateMouseInput(params: any) {
+    const response = await this.client.request('/api/simulate-mouse-input', params);
+    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+  }
+
+  async simulateKeyboardInput(params: any) {
+    const response = await this.client.request('/api/simulate-keyboard-input', params);
+    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+  }
+
+  async characterNavigation(params: any) {
+    const response = await this.client.request('/api/character-navigation', params);
+    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+  }
+
+  async findAndReplaceInScripts(params: any) {
+    const response = await this.client.request('/api/find-and-replace-in-scripts', params);
+    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+  }
+
+  async getConnectedInstances(params: any) {
+    const response = await this.client.request('/api/get-connected-instances', params);
+    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+  }
+
+  async getScriptAnalysis(params: any) {
+    const response = await this.client.request('/api/get-script-analysis', params);
+    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+  }
+
+  async getOutputLog(params: any) {
+    const response = await this.client.request('/api/get-output-log', params);
+    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+  }
+
+  // === Bulk Operations ===
+
+  async batchExecute(operations: any[]) {
+    const results: Array<{ success: boolean; data?: any; error?: string }> = [];
+    let succeeded = 0;
+    let failed = 0;
+
+    for (const op of operations) {
+      try {
+        const toolName = op.tool;
+        const params = op.params || {};
+        const handler = (this as any)[this.getMethodName(toolName)];
+        if (!handler) {
+          results.push({ success: false, error: `Unknown tool: ${toolName}` });
+          failed++;
+          continue;
+        }
+        const result = await handler.call(this, params);
+        const text = result?.content?.[0]?.text;
+        if (text) {
+          try {
+            const parsed = JSON.parse(text);
+            if (parsed.error) {
+              results.push({ success: false, error: parsed.error });
+              failed++;
+            } else {
+              results.push({ success: true, data: parsed });
+              succeeded++;
+            }
+          } catch {
+            results.push({ success: true, data: text });
+            succeeded++;
+          }
+        } else {
+          results.push({ success: true, data: result });
+          succeeded++;
+        }
+      } catch (err: any) {
+        results.push({ success: false, error: err.message || String(err) });
+        failed++;
+      }
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          results,
+          summary: { total: operations.length, succeeded, failed }
+        })
+      }]
+    };
+  }
+
+  private getMethodName(toolName: string): string {
+    const map: Record<string, string> = {
+      'get_file_tree': 'getFileTree',
+      'search_files': 'searchFiles',
+      'get_place_info': 'getPlaceInfo',
+      'get_services': 'getServices',
+      'search_objects': 'searchObjects',
+      'get_instance_properties': 'getInstanceProperties',
+      'get_instance_children': 'getInstanceChildren',
+      'search_by_property': 'searchByProperty',
+      'get_class_info': 'getClassInfo',
+      'get_project_structure': 'getProjectStructure',
+      'set_property': 'setProperty',
+      'mass_set_property': 'massSetProperty',
+      'mass_get_property': 'massGetProperty',
+      'create_object': 'createObject',
+      'mass_create_objects': 'massCreateObjects',
+      'delete_object': 'deleteObject',
+      'smart_duplicate': 'smartDuplicate',
+      'mass_duplicate': 'massDuplicate',
+      'get_script_source': 'getScriptSource',
+      'set_script_source': 'setScriptSource',
+      'edit_script_lines': 'editScriptLines',
+      'insert_script_lines': 'insertScriptLines',
+      'delete_script_lines': 'deleteScriptLines',
+      'find_and_replace_in_scripts': 'findAndReplaceInScripts',
+      'get_connected_instances': 'getConnectedInstances',
+      'get_script_analysis': 'getScriptAnalysis',
+      'get_output_log': 'getOutputLog',
+      'get_attribute': 'getAttribute',
+      'set_attribute': 'setAttribute',
+      'get_attributes': 'getAttributes',
+      'delete_attribute': 'deleteAttribute',
+      'get_tags': 'getTags',
+      'add_tag': 'addTag',
+      'remove_tag': 'removeTag',
+      'get_tagged': 'getTagged',
+      'get_selection': 'getSelection',
+      'execute_luau': 'executeLuau',
+      'undo': 'undo',
+      'redo': 'redo',
+      'start_playtest': 'startPlaytest',
+      'stop_playtest': 'stopPlaytest',
+      'get_playtest_output': 'getPlaytestOutput',
+      'generate_terrain': 'generateTerrain',
+      'control_lighting': 'controlLighting',
+      'insert_asset': 'insertAsset',
+      'preview_asset': 'previewAsset',
+      'capture_screenshot': 'captureScreenshot',
+      'capture_viewport': 'captureViewport',
+      'bulk_get_scripts': 'bulkGetScripts',
+      'bulk_set_properties': 'bulkSetProperties',
+    };
+    return map[toolName] || toolName;
+  }
+
+  async bulkGetScripts(scripts: Array<{ path: string; startLine?: number; endLine?: number }>) {
+    const results: Array<{ path: string; success: boolean; source?: string; error?: string }> = [];
+
+    for (const script of scripts) {
+      try {
+        const result = await this.getScriptSource(script.path, script.startLine, script.endLine);
+        const text = result?.content?.[0]?.text;
+        if (text) {
+          const parsed = JSON.parse(text);
+          if (parsed.error) {
+            results.push({ path: script.path, success: false, error: parsed.error });
+          } else {
+            results.push({ path: script.path, success: true, source: parsed.source });
+          }
+        } else {
+          results.push({ path: script.path, success: false, error: 'No response' });
+        }
+      } catch (err: any) {
+        results.push({ path: script.path, success: false, error: err.message || String(err) });
+      }
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          results,
+          summary: { total: scripts.length, succeeded: results.filter(r => r.success).length, failed: results.filter(r => !r.success).length }
+        })
+      }]
+    };
+  }
+
+  async bulkSetProperties(operations: Array<{ path: string; property: string; value: any }>) {
+    const results: Array<{ path: string; property: string; success: boolean; error?: string }> = [];
+
+    for (const op of operations) {
+      try {
+        const result = await this.setProperty(op.path, op.property, op.value);
+        const text = result?.content?.[0]?.text;
+        if (text) {
+          const parsed = JSON.parse(text);
+          if (parsed.error) {
+            results.push({ path: op.path, property: op.property, success: false, error: parsed.error });
+          } else {
+            results.push({ path: op.path, property: op.property, success: true });
+          }
+        } else {
+          results.push({ path: op.path, property: op.property, success: false, error: 'No response' });
+        }
+      } catch (err: any) {
+        results.push({ path: op.path, property: op.property, success: false, error: err.message || String(err) });
+      }
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          success: true,
+          results,
+          summary: { total: operations.length, succeeded: results.filter(r => r.success).length, failed: results.filter(r => !r.success).length }
+        })
+      }]
+    };
+  }
+
+  // === Multi-Place Management ===
+
+  async managePlaces(params: any) {
+    const action = params?.action || 'list_places';
+    const response = await this.client.request('/places', { action, placeId: params?.placeId, placeName: params?.placeName });
+    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+  }
+
+  // === UI Studio ===
+
+  async buildUi(params: any) {
+    const response = await this.client.request('/api/build-ui', {
+      parent: params?.parent,
+      ui: params?.ui,
+    });
+    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+  }
+
+  async captureUi(params: any) {
+    const response = await this.client.request('/api/capture-screenshot', {
+      width: params?.width || 1920,
+      height: params?.height || 1080,
+    });
+    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+  }
+
+  async getUiTemplates(params: any) {
+    const templateName = params?.template || 'all';
+    const templates: Record<string, any> = {
+      health_bar: {
+        class: "ScreenGui",
+        name: "HealthBarUI",
+        properties: { ResetOnSpawn: false, ZIndexBehavior: "Sibling" },
+        children: [
+          {
+            class: "Frame",
+            name: "HealthBar",
+            properties: {
+              Size: { X: { Scale: 0.3, Offset: 0 }, Y: { Scale: 0.04, Offset: 0 } },
+              Position: { X: { Scale: 0.02, Offset: 0 }, Y: { Scale: 0.93, Offset: 0 } },
+              BackgroundColor3: [0.15, 0.15, 0.15],
+              BorderSizePixel: 0,
+            },
+            children: [
+              {
+                class: "Frame",
+                name: "Fill",
+                properties: {
+                  Size: { X: { Scale: 1, Offset: 0 }, Y: { Scale: 1, Offset: 0 } },
+                  BackgroundColor3: [0.2, 0.8, 0.2],
+                  BorderSizePixel: 0,
+                },
+                children: [
+                  { class: "UICorner", properties: { CornerRadius: { X: { Scale: 0, Offset: 8 }, Y: { Scale: 0, Offset: 8 } } } }
+                ]
+              },
+              { class: "UICorner", properties: { CornerRadius: { X: { Scale: 0, Offset: 8 }, Y: { Scale: 0, Offset: 8 } } } },
+              {
+                class: "TextLabel",
+                name: "HealthText",
+                properties: {
+                  Size: { X: { Scale: 1, Offset: 0 }, Y: { Scale: 1, Offset: 0 } },
+                  BackgroundTransparency: 1,
+                  Text: "100/100",
+                  TextColor3: [1, 1, 1],
+                  TextSize: 14,
+                  Font: "GothamBold",
+                }
+              }
+            ]
+          }
+        ]
+      },
+      inventory_grid: {
+        class: "ScreenGui",
+        name: "InventoryUI",
+        properties: { ResetOnSpawn: false, ZIndexBehavior: "Sibling" },
+        children: [
+          {
+            class: "Frame",
+            name: "InventoryPanel",
+            properties: {
+              Size: { X: { Scale: 0.4, Offset: 0 }, Y: { Scale: 0.5, Offset: 0 } },
+              Position: { X: { Scale: 0.3, Offset: 0 }, Y: { Scale: 0.25, Offset: 0 } },
+              BackgroundColor3: [0.12, 0.12, 0.15],
+              BorderSizePixel: 0,
+            },
+            children: [
+              { class: "UICorner", properties: { CornerRadius: { X: { Scale: 0, Offset: 12 }, Y: { Scale: 0, Offset: 12 } } } },
+              {
+                class: "TextLabel",
+                name: "Title",
+                properties: {
+                  Size: { X: { Scale: 1, Offset: 0 }, Y: { Scale: 0.1, Offset: 0 } },
+                  BackgroundTransparency: 1,
+                  Text: "Inventory",
+                  TextColor3: [1, 1, 1],
+                  TextSize: 20,
+                  Font: "GothamBold",
+                }
+              },
+              {
+                class: "Frame",
+                name: "Grid",
+                properties: {
+                  Size: { X: { Scale: 0.95, Offset: 0 }, Y: { Scale: 0.85, Offset: 0 } },
+                  Position: { X: { Scale: 0.025, Offset: 0 }, Y: { Scale: 0.12, Offset: 0 } },
+                  BackgroundTransparency: 1,
+                },
+                children: [
+                  {
+                    class: "UIGridLayout",
+                    properties: {
+                      CellSize: { X: { Scale: 0, Offset: 60 }, Y: { Scale: 0, Offset: 60 } },
+                      CellPadding: { X: { Scale: 0, Offset: 8 }, Y: { Scale: 0, Offset: 8 } },
+                      SortOrder: "LayoutOrder",
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      dialog_box: {
+        class: "ScreenGui",
+        name: "DialogUI",
+        properties: { ResetOnSpawn: false, ZIndexBehavior: "Sibling" },
+        children: [
+          {
+            class: "Frame",
+            name: "DialogFrame",
+            properties: {
+              Size: { X: { Scale: 0.5, Offset: 0 }, Y: { Scale: 0.2, Offset: 0 } },
+              Position: { X: { Scale: 0.25, Offset: 0 }, Y: { Scale: 0.75, Offset: 0 } },
+              BackgroundColor3: [0.1, 0.1, 0.12],
+              BorderSizePixel: 0,
+            },
+            children: [
+              { class: "UICorner", properties: { CornerRadius: { X: { Scale: 0, Offset: 12 }, Y: { Scale: 0, Offset: 12 } } } },
+              {
+                class: "TextLabel",
+                name: "SpeakerName",
+                properties: {
+                  Size: { X: { Scale: 0.3, Offset: 0 }, Y: { Scale: 0.25, Offset: 0 } },
+                  Position: { X: { Scale: 0.02, Offset: 0 }, Y: { Scale: 0.05, Offset: 0 } },
+                  BackgroundTransparency: 1,
+                  Text: "NPC",
+                  TextColor3: [0.4, 0.7, 1],
+                  TextSize: 16,
+                  Font: "GothamBold",
+                  TextXAlignment: "Left",
+                }
+              },
+              {
+                class: "TextLabel",
+                name: "DialogText",
+                properties: {
+                  Size: { X: { Scale: 0.96, Offset: 0 }, Y: { Scale: 0.45, Offset: 0 } },
+                  Position: { X: { Scale: 0.02, Offset: 0 }, Y: { Scale: 0.3, Offset: 0 } },
+                  BackgroundTransparency: 1,
+                  Text: "Hello, adventurer!",
+                  TextColor3: [0.9, 0.9, 0.9],
+                  TextSize: 18,
+                  Font: "Gotham",
+                  TextXAlignment: "Left",
+                  TextWrapped: true,
+                }
+              },
+              {
+                class: "TextButton",
+                name: "ContinueBtn",
+                properties: {
+                  Size: { X: { Scale: 0.15, Offset: 0 }, Y: { Scale: 0.25, Offset: 0 } },
+                  Position: { X: { Scale: 0.82, Offset: 0 }, Y: { Scale: 0.7, Offset: 0 } },
+                  BackgroundColor3: [0.2, 0.5, 1],
+                  Text: "Continue",
+                  TextColor3: [1, 1, 1],
+                  TextSize: 14,
+                  Font: "GothamBold",
+                  BorderSizePixel: 0,
+                },
+                children: [
+                  { class: "UICorner", properties: { CornerRadius: { X: { Scale: 0, Offset: 6 }, Y: { Scale: 0, Offset: 6 } } } }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      hotbar: {
+        class: "ScreenGui",
+        name: "HotbarUI",
+        properties: { ResetOnSpawn: false, ZIndexBehavior: "Sibling" },
+        children: [
+          {
+            class: "Frame",
+            name: "Hotbar",
+            properties: {
+              Size: { X: { Scale: 0.4, Offset: 0 }, Y: { Scale: 0.08, Offset: 0 } },
+              Position: { X: { Scale: 0.3, Offset: 0 }, Y: { Scale: 0.9, Offset: 0 } },
+              BackgroundColor3: [0.12, 0.12, 0.15],
+              BorderSizePixel: 0,
+            },
+            children: [
+              { class: "UICorner", properties: { CornerRadius: { X: { Scale: 0, Offset: 8 }, Y: { Scale: 0, Offset: 8 } } } },
+              {
+                class: "UIListLayout",
+                properties: {
+                  FillDirection: "Horizontal",
+                  HorizontalAlignment: "Center",
+                  Padding: { X: { Scale: 0, Offset: 4 }, Y: { Scale: 0, Offset: 0 } },
+                }
+              }
+            ]
+          }
+        ]
+      },
+      notification: {
+        class: "ScreenGui",
+        name: "NotificationUI",
+        properties: { ResetOnSpawn: false, ZIndexBehavior: "Sibling" },
+        children: [
+          {
+            class: "Frame",
+            name: "NotificationContainer",
+            properties: {
+              Size: { X: { Scale: 0.3, Offset: 0 }, Y: { Scale: 0.4, Offset: 0 } },
+              Position: { X: { Scale: 0.68, Offset: 0 }, Y: { Scale: 0.05, Offset: 0 } },
+              BackgroundTransparency: 1,
+            },
+            children: [
+              {
+                class: "UIListLayout",
+                properties: {
+                  SortOrder: "LayoutOrder",
+                  VerticalAlignment: "Top",
+                  Padding: { X: { Scale: 0, Offset: 8 }, Y: { Scale: 0, Offset: 8 } },
+                }
+              }
+            ]
+          }
+        ]
+      },
+      scoreboard: {
+        class: "ScreenGui",
+        name: "ScoreboardUI",
+        properties: { ResetOnSpawn: false, ZIndexBehavior: "Sibling" },
+        children: [
+          {
+            class: "Frame",
+            name: "Scoreboard",
+            properties: {
+              Size: { X: { Scale: 0.25, Offset: 0 }, Y: { Scale: 0.5, Offset: 0 } },
+              Position: { X: { Scale: 0.73, Offset: 0 }, Y: { Scale: 0.25, Offset: 0 } },
+              BackgroundColor3: [0.1, 0.1, 0.12],
+              BorderSizePixel: 0,
+            },
+            children: [
+              { class: "UICorner", properties: { CornerRadius: { X: { Scale: 0, Offset: 10 }, Y: { Scale: 0, Offset: 10 } } } },
+              {
+                class: "TextLabel",
+                name: "Title",
+                properties: {
+                  Size: { X: { Scale: 1, Offset: 0 }, Y: { Scale: 0.08, Offset: 0 } },
+                  BackgroundTransparency: 1,
+                  Text: "Players",
+                  TextColor3: [1, 1, 1],
+                  TextSize: 18,
+                  Font: "GothamBold",
+                }
+              },
+              {
+                class: "ScrollingFrame",
+                name: "PlayerList",
+                properties: {
+                  Size: { X: { Scale: 0.95, Offset: 0 }, Y: { Scale: 0.88, Offset: 0 } },
+                  Position: { X: { Scale: 0.025, Offset: 0 }, Y: { Scale: 0.1, Offset: 0 } },
+                  BackgroundTransparency: 1,
+                  ScrollBarThickness: 4,
+                  BorderSizePixel: 0,
+                },
+                children: [
+                  {
+                    class: "UIListLayout",
+                    properties: {
+                      SortOrder: "LayoutOrder",
+                      Padding: { X: { Scale: 0, Offset: 4 }, Y: { Scale: 0, Offset: 4 } },
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    };
+
+    if (templateName === 'all') {
+      return { content: [{ type: 'text', text: JSON.stringify({ success: true, templates }) }] };
+    }
+
+    const template = templates[templateName];
+    if (!template) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: `Unknown template: ${templateName}` }) }] };
+    }
+
+    return { content: [{ type: 'text', text: JSON.stringify({ success: true, template: { [templateName]: template } }) }] };
+  }
+
+  // === Bidirectional Sync ===
+
+  async syncProjectEnhanced(params: any) {
+    const action = params?.action || 'get_changes';
+    const response = await this.client.request('/sync', {
+      action,
+      projectDir: params?.project_dir,
+      syncRoots: params?.sync_roots,
+      autoSync: params?.auto_sync,
+      files: params?.files,
+      scripts: params?.scripts,
+    });
+    return { content: [{ type: 'text', text: JSON.stringify(response) }] };
+  }
+
+  // === Test Report ===
+
+  async generateTestReport(params: any) {
+    const mode = params?.mode || 'run';
+    const duration = params?.duration || 5;
+    const outputPath = params?.output_path || './test-report.json';
+    const testName = params?.test_name || `Test Run ${new Date().toISOString()}`;
+
+    try {
+      // Start playtest
+      await this.client.request('/api/start-playtest', { mode });
+
+      // Wait for playtest to run
+      await new Promise(resolve => setTimeout(resolve, duration * 1000));
+
+      // Collect output logs
+      const logs = await this.client.request('/api/get-playtest-output', {});
+
+      // Stop playtest
+      await this.client.request('/api/stop-playtest', {});
+
+      // Collect errors and warnings
+      const outputLogs = await this.client.request('/api/get-output-log', { filter: 'All', limit: 200 });
+
+      const errors = (outputLogs?.logs || []).filter((l: any) => l.messageType === 'Error' || l.messageType === '3');
+      const warnings = (outputLogs?.logs || []).filter((l: any) => l.messageType === 'Warning' || l.messageType === '2');
+
+      const report = {
+        testName,
+        timestamp: new Date().toISOString(),
+        mode,
+        duration,
+        success: errors.length === 0,
+        summary: {
+          totalLogs: outputLogs?.logs?.length || 0,
+          errors: errors.length,
+          warnings: warnings.length,
+          playtestOutput: (logs?.output || []).length,
+        },
+        errors: errors.map((l: any) => ({ message: l.message, timestamp: l.timestamp })),
+        warnings: warnings.map((l: any) => ({ message: l.message, timestamp: l.timestamp })),
+        playtestOutput: logs?.output || [],
+      };
+
+      // Save report to local file
+      try {
+        fs.writeFileSync(path.resolve(outputPath), JSON.stringify(report, null, 2), 'utf-8');
+
+        // Also save readable version
+        const readablePath = outputPath.replace('.json', '.txt');
+        let readable = `Test Report: ${testName}\n`;
+        readable += `${'='.repeat(60)}\n`;
+        readable += `Timestamp: ${report.timestamp}\n`;
+        readable += `Mode: ${mode}\n`;
+        readable += `Duration: ${duration}s\n`;
+        readable += `Result: ${report.success ? 'PASS' : 'FAIL'}\n\n`;
+        readable += `Summary:\n`;
+        readable += `  Total Logs: ${report.summary.totalLogs}\n`;
+        readable += `  Errors: ${report.summary.errors}\n`;
+        readable += `  Warnings: ${report.summary.warnings}\n`;
+        readable += `  Playtest Output: ${report.summary.playtestOutput}\n\n`;
+
+        if (errors.length > 0) {
+          readable += `Errors:\n`;
+          errors.forEach((e: any) => { readable += `  - ${e.message}\n`; });
+          readable += '\n';
+        }
+        if (warnings.length > 0) {
+          readable += `Warnings:\n`;
+          warnings.forEach((w: any) => { readable += `  - ${w.message}\n`; });
+          readable += '\n';
+        }
+        if ((logs?.output || []).length > 0) {
+          readable += `Playtest Output:\n`;
+          (logs.output || []).forEach((o: any) => { readable += `  [${o.type || 'info'}] ${o.message}\n`; });
+        }
+
+        fs.writeFileSync(path.resolve(readablePath), readable, 'utf-8');
+      } catch (fileErr) {
+        // File write failed, still return JSON
+      }
+
+      return { content: [{ type: 'text', text: JSON.stringify(report) }] };
+    } catch (err: any) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: err.message }) }] };
+    }
+  }
+
+  // === UI Design Check ===
+
+  async checkUiDesign(params: any) {
+    const instancePath = params?.instancePath || 'game.StarterGui';
+    const checks = params?.checks || ['all'];
+
+    try {
+      // Get all UI instances
+      const treeResult = await this.client.request('/api/file-tree', { path: instancePath, maxDepth: 5 });
+      const propsResult = await this.client.request('/api/get-instance-properties', { instancePath, excludeSource: true });
+
+      const suggestions: Array<{ severity: string; category: string; path: string; message: string }> = [];
+
+      // Helper to get UI tree
+      const collectUiInstances = (node: any, path: string): Array<{ path: string; className: string; properties: any }> => {
+        const result: Array<{ path: string; className: string; properties: any }> = [];
+        if (node) {
+          result.push({ path, className: node.className || '', properties: node.properties || {} });
+          if (node.children) {
+            for (const child of node.children) {
+              const childPath = `${path}.${child.name || 'Unknown'}`;
+              result.push(...collectUiInstances(child, childPath));
+            }
+          }
+        }
+        return result;
+      };
+
+      const uiInstances = collectUiInstances(treeResult, instancePath);
+      const runAll = checks.includes('all');
+
+      for (const inst of uiInstances) {
+        const cls = inst.className;
+        const props = inst.properties;
+
+        // Touch target check
+        if (runAll || checks.includes('touch_targets')) {
+          if (cls === 'TextButton' || cls === 'ImageButton') {
+            const size = props.Size;
+            if (size && typeof size === 'object' && size.X && size.Y) {
+              const offsetW = size.X.Offset || 0;
+              const offsetH = size.Y.Offset || 0;
+              const scaleW = size.X.Scale || 0;
+              const scaleH = size.Y.Scale || 0;
+              if (offsetW < 44 || offsetH < 44) {
+                suggestions.push({
+                  severity: 'warning',
+                  category: 'touch_targets',
+                  path: inst.path,
+                  message: `Button too small for touch (${offsetW}x${offsetH} offset). Minimum recommended: 44x44 pixels.`
+                });
+              }
+            }
+          }
+        }
+
+        // Readability check
+        if (runAll || checks.includes('readability')) {
+          if (cls === 'TextLabel' || cls === 'TextButton') {
+            const textSize = props.TextSize;
+            if (textSize && typeof textSize === 'number' && textSize < 14) {
+              suggestions.push({
+                severity: 'warning',
+                category: 'readability',
+                path: inst.path,
+                message: `TextSize ${textSize} may be too small for readability. Minimum recommended: 14px.`
+              });
+            }
+            const textColor = props.TextColor3;
+            const bgColor = props.BackgroundColor3;
+            if (textColor && bgColor && typeof textColor === 'object' && typeof bgColor === 'object') {
+              // Simple contrast check
+              const tLum = 0.299 * (textColor[0] || 0) + 0.587 * (textColor[1] || 0) + 0.114 * (textColor[2] || 0);
+              const bLum = 0.299 * (bgColor[0] || 0) + 0.587 * (bgColor[1] || 0) + 0.114 * (bgColor[2] || 0);
+              const contrast = Math.abs(tLum - bLum);
+              if (contrast < 0.3) {
+                suggestions.push({
+                  severity: 'warning',
+                  category: 'readability',
+                  path: inst.path,
+                  message: `Low contrast between text and background (contrast: ${contrast.toFixed(2)}). Consider increasing contrast.`
+                });
+              }
+            }
+          }
+        }
+
+        // Safe areas check
+        if (runAll || checks.includes('safe_areas')) {
+          if (cls === 'Frame' || cls === 'TextButton' || cls === 'TextLabel' || cls === 'ImageLabel') {
+            const pos = props.Position;
+            if (pos && typeof pos === 'object' && pos.X && pos.Y) {
+              const scaleW = pos.X.Scale || 0;
+              const scaleH = pos.Y.Scale || 0;
+              if (scaleW < 0.02 || scaleH < 0.02) {
+                suggestions.push({
+                  severity: 'info',
+                  category: 'safe_areas',
+                  path: inst.path,
+                  message: `Element too close to screen edge (Position: ${scaleW.toFixed(2)}, ${scaleH.toFixed(2)}). Consider safe area margins.`
+                });
+              }
+            }
+          }
+        }
+
+        // Accessibility check
+        if (runAll || checks.includes('accessibility')) {
+          if (cls === 'TextButton' || cls === 'ImageButton') {
+            if (!props.AutoButtonColor && !props.Active) {
+              suggestions.push({
+                severity: 'info',
+                category: 'accessibility',
+                path: inst.path,
+                message: `Button has no visual feedback (AutoButtonColor=false, Active=false). Users won't see hover/press states.`
+              });
+            }
+          }
+        }
+
+        // Layout check
+        if (runAll || checks.includes('layout')) {
+          if (cls === 'Frame' || cls === 'ScrollingFrame') {
+            const children = inst.properties?.children || [];
+            const hasLayout = children.some((c: any) =>
+              c.className === 'UIListLayout' || c.className === 'UIGridLayout' || c.className === 'UIPageLayout'
+            );
+            if (children.length > 3 && !hasLayout) {
+              suggestions.push({
+                severity: 'info',
+                category: 'layout',
+                path: inst.path,
+                message: `Container has ${children.length} children but no layout constraint. Consider adding UIListLayout or UIGridLayout.`
+              });
+            }
+          }
+        }
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            instancePath,
+            checks: runAll ? ['all'] : checks,
+            totalInstances: uiInstances.length,
+            suggestions,
+            summary: {
+              total: suggestions.length,
+              warnings: suggestions.filter(s => s.severity === 'warning').length,
+              info: suggestions.filter(s => s.severity === 'info').length,
+            }
+          })
+        }]
+      };
+    } catch (err: any) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: err.message }) }] };
+    }
   }
 }

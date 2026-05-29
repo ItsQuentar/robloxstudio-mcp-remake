@@ -1,5 +1,24 @@
 const ScriptEditorService = game.GetService("ScriptEditorService");
 
+const FORBIDDEN_PATHS = [
+	"game.CoreGui",
+	"game.CorePackages",
+	"game.PluginGuiService",
+	"game.JointsService",
+];
+
+function isForbiddenPath(path: string): boolean {
+	if (path.find("..")[0]) return true;
+	const cleaned = path.gsub("^game%.", "")[0];
+	for (const forbidden of FORBIDDEN_PATHS) {
+		const fbCleaned = forbidden.gsub("^game%.", "")[0];
+		if (cleaned === fbCleaned || cleaned.sub(1, fbCleaned.size()) === fbCleaned + ".") {
+			return true;
+		}
+	}
+	return false;
+}
+
 function safeCall<T>(func: (...args: never[]) => T, ...args: never[]): T | undefined {
 	const [success, result] = pcall(func, ...args);
 	if (success) {
@@ -31,6 +50,11 @@ function getInstanceByPath(path: string): Instance | undefined {
 		return game;
 	}
 
+	if (isForbiddenPath(path)) {
+		warn(`MCP Security: Blocked access to forbidden path: ${path}`);
+		return undefined;
+	}
+
 	const cleaned = path.gsub("^game%.", "")[0];
 	const parts: string[] = [];
 	for (const [part] of cleaned.gmatch("[^%.]+")) {
@@ -38,9 +62,20 @@ function getInstanceByPath(path: string): Instance | undefined {
 	}
 
 	let current: Instance | undefined = game;
-	for (const part of parts) {
+	for (let i = 0; i < parts.size(); i++) {
 		if (!current) return undefined;
-		current = current.FindFirstChild(part);
+		const part = parts[i];
+
+		// Try FindFirstChild first
+		let found: Instance | undefined = current.FindFirstChild(part) as Instance | undefined;
+
+		// If not found and we're at the root (game), try as a service
+		if (!found && current === game) {
+			const [ok, svc] = pcall(() => game.GetService(part as keyof Services));
+			if (ok && svc) found = svc as Instance;
+		}
+
+		current = found;
 	}
 
 	return current;
@@ -236,7 +271,11 @@ function convertPropertyValue(instance: Instance, propertyName: string, property
 			if (enumSuccess && enumVal) return enumVal;
 		}
 		if (propertyName === "BrickColor") {
-			return new BrickColor(propertyValue as unknown as number);
+			if (typeIs(propertyValue, "string")) {
+				// BrickColor.new() exists in Roblox but not in rbxts types
+				return (BrickColor as unknown as { new: (name: string) => BrickColor }).new(propertyValue as string);
+			}
+			return new BrickColor(propertyValue as number);
 		}
 		if (propertyValue === "true") return true;
 		if (propertyValue === "false") return false;
@@ -347,6 +386,7 @@ export = {
 	safeCall,
 	getInstancePath,
 	getInstanceByPath,
+	isForbiddenPath,
 	splitLines,
 	joinLines,
 	readScriptSource,

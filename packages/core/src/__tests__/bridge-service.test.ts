@@ -19,7 +19,7 @@ describe('BridgeService', () => {
 
       const requestPromise = bridgeService.sendRequest(endpoint, data);
 
-      const pendingRequest = bridgeService.getPendingRequest();
+      const pendingRequest = await bridgeService.getPendingRequest('edit', false);
       expect(pendingRequest).toBeTruthy();
       expect(pendingRequest?.request.endpoint).toBe(endpoint);
       expect(pendingRequest?.request.data).toEqual(data);
@@ -31,7 +31,7 @@ describe('BridgeService', () => {
       const response = { result: 'success' };
 
       const requestPromise = bridgeService.sendRequest(endpoint, data);
-      const pendingRequest = bridgeService.getPendingRequest();
+      const pendingRequest = await bridgeService.getPendingRequest('edit', false);
 
       bridgeService.resolveRequest(pendingRequest!.requestId, response);
 
@@ -45,7 +45,7 @@ describe('BridgeService', () => {
       const error = 'Test error';
 
       const requestPromise = bridgeService.sendRequest(endpoint, data);
-      const pendingRequest = bridgeService.getPendingRequest();
+      const pendingRequest = await bridgeService.getPendingRequest('edit', false);
 
       bridgeService.rejectRequest(pendingRequest!.requestId, error);
 
@@ -79,7 +79,7 @@ describe('BridgeService', () => {
         await expect(promise).rejects.toThrow('Connection closed');
       }
 
-      expect(bridgeService.getPendingRequest()).toBeNull();
+      expect(await bridgeService.getPendingRequest('edit', false)).toBeNull();
     });
   });
 
@@ -96,22 +96,22 @@ describe('BridgeService', () => {
 
       bridgeService.sendRequest('/api/test3', { order: 3 });
 
-      const firstRequest = bridgeService.getPendingRequest();
+      const firstRequest = await bridgeService.getPendingRequest('edit', false);
       expect(firstRequest?.request.data.order).toBe(1);
 
       bridgeService.resolveRequest(firstRequest!.requestId, {});
 
-      const secondRequest = bridgeService.getPendingRequest();
+      const secondRequest = await bridgeService.getPendingRequest('edit', false);
       expect(secondRequest?.request.data.order).toBe(2);
 
       bridgeService.resolveRequest(secondRequest!.requestId, {});
 
-      const thirdRequest = bridgeService.getPendingRequest();
+      const thirdRequest = await bridgeService.getPendingRequest('edit', false);
       expect(thirdRequest?.request.data.order).toBe(3);
 
       bridgeService.resolveRequest(thirdRequest!.requestId, {});
 
-      expect(bridgeService.getPendingRequest()).toBeNull();
+      expect(await bridgeService.getPendingRequest('edit', false)).toBeNull();
     });
   });
 });

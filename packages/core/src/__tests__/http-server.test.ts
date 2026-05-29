@@ -28,7 +28,7 @@ describe('HTTP Server', () => {
 
       expect(response.body).toMatchObject({
         status: 'ok',
-        service: 'robloxstudio-mcp',
+        service: 'ItsQuentar Roblox Plugin Remake',
         pluginConnected: false,
         mcpServerActive: false
       });
@@ -65,24 +65,11 @@ describe('HTTP Server', () => {
       p1.catch(() => {});
       p2.catch(() => {});
 
-      expect(bridge.getPendingRequest()).toBeTruthy();
+      expect(await bridge.getPendingRequest('edit', false)).toBeTruthy();
 
       await request(app).post('/disconnect').expect(200);
 
-      expect(bridge.getPendingRequest()).toBeNull();
-    });
-
-    test('should timeout plugin connection after inactivity', async () => {
-
-      await request(app).post('/ready').expect(200);
-      expect(app.isPluginConnected()).toBe(true);
-
-      const originalDateNow = Date.now;
-      Date.now = jest.fn(() => originalDateNow() + 11000);
-
-      expect(app.isPluginConnected()).toBe(false);
-
-      Date.now = originalDateNow;
+      expect(await bridge.getPendingRequest('edit', false)).toBeNull();
     });
   });
 
@@ -152,7 +139,7 @@ describe('HTTP Server', () => {
       const responseData = { result: 'success' };
 
       const requestPromise = bridge.sendRequest('/api/test', {});
-      const pendingRequest = bridge.getPendingRequest();
+      const pendingRequest = await bridge.getPendingRequest('edit', false);
 
       const response = await request(app)
         .post('/response')
@@ -173,7 +160,7 @@ describe('HTTP Server', () => {
 
       const requestPromise = bridge.sendRequest('/api/test', {});
       requestPromise.catch(() => {});
-      const pendingRequest = bridge.getPendingRequest();
+      const pendingRequest = await bridge.getPendingRequest('edit', false);
 
       const response = await request(app)
         .post('/response')
@@ -190,25 +177,12 @@ describe('HTTP Server', () => {
   });
 
   describe('MCP Server State Management', () => {
-    test('should track MCP server activity', async () => {
+    test('should track MCP server state', async () => {
       app.setMCPServerActive(true);
       expect(app.isMCPServerActive()).toBe(true);
 
-      app.trackMCPActivity();
-
-      expect(app.isMCPServerActive()).toBe(true);
-    });
-
-    test('should timeout MCP server after inactivity', async () => {
-      app.setMCPServerActive(true);
-      expect(app.isMCPServerActive()).toBe(true);
-
-      const originalDateNow = Date.now;
-      Date.now = jest.fn(() => originalDateNow() + 16000);
-
+      app.setMCPServerActive(false);
       expect(app.isMCPServerActive()).toBe(false);
-
-      Date.now = originalDateNow;
     });
   });
 
@@ -226,7 +200,6 @@ describe('HTTP Server', () => {
         pluginConnected: true,
         mcpServerActive: true
       });
-      expect(response.body.lastMCPActivity).toBeGreaterThan(0);
       expect(response.body.uptime).toBeGreaterThan(0);
     });
   });

@@ -15,6 +15,25 @@ import { Connection, RequestPayload, PollResponse } from "../types";
 
 type Handler = (data: Record<string, unknown>) => unknown;
 
+const RATE_LIMIT = 450;
+const RATE_WINDOW = 60;
+let requestCount = 0;
+let windowStart = tick();
+
+function checkRateLimit(): boolean {
+	const now = tick();
+	if (now - windowStart > RATE_WINDOW) {
+		requestCount = 0;
+		windowStart = now;
+	}
+	requestCount++;
+	if (requestCount > RATE_LIMIT) {
+		warn(`MCP Plugin: Rate limit exceeded (${RATE_LIMIT}/min)`);
+		return false;
+	}
+	return true;
+}
+
 const routeMap: Record<string, Handler> = {
 
 	"/api/file-tree": QueryHandlers.getFileTree,
@@ -28,12 +47,12 @@ const routeMap: Record<string, Handler> = {
 	"/api/class-info": QueryHandlers.getClassInfo,
 	"/api/project-structure": QueryHandlers.getProjectStructure,
 	"/api/grep-scripts": QueryHandlers.grepScripts,
+	"/api/get-connected-instances": QueryHandlers.getConnectedInstances,
+	"/api/get-output-log": QueryHandlers.getOutputLog,
 
 	"/api/set-property": PropertyHandlers.setProperty,
 	"/api/mass-set-property": PropertyHandlers.massSetProperty,
 	"/api/mass-get-property": PropertyHandlers.massGetProperty,
-	"/api/set-calculated-property": PropertyHandlers.setCalculatedProperty,
-	"/api/set-relative-property": PropertyHandlers.setRelativeProperty,
 
 	"/api/create-object": InstanceHandlers.createObject,
 	"/api/mass-create-objects": InstanceHandlers.massCreateObjects,
@@ -64,6 +83,9 @@ const routeMap: Record<string, Handler> = {
 	"/api/start-playtest": TestHandlers.startPlaytest,
 	"/api/stop-playtest": TestHandlers.stopPlaytest,
 	"/api/get-playtest-output": TestHandlers.getPlaytestOutput,
+	"/api/character-navigation": TestHandlers.characterNavigation,
+	"/api/simulate-mouse-input": TestHandlers.simulateMouseInput,
+	"/api/simulate-keyboard-input": TestHandlers.simulateKeyboardInput,
 
 	"/api/export-build": BuildHandlers.exportBuild,
 	"/api/import-build": BuildHandlers.importBuild,
@@ -75,6 +97,7 @@ const routeMap: Record<string, Handler> = {
 
 	"/api/capture-screenshot": CaptureHandlers.captureScreenshot,
 	"/api/capture-viewport": CaptureHandlers.captureViewport,
+	"/api/build-ui": InstanceHandlers.buildUi,
 	"/api/insert-asset-v2": AssetHandlers.insertAssetV2,
 	"/api/history-control": MetadataHandlers.historyControl,
 	"/api/control-selection": MetadataHandlers.controlSelection,
@@ -83,7 +106,6 @@ const routeMap: Record<string, Handler> = {
 	"/api/check-collisions": QueryHandlers.checkCollisions,
 	"/api/manage-datastore": MetadataHandlers.manageDatastore,
 	"/api/build-library-advanced": BuildHandlers.buildLibraryAdvanced,
-	"/api/run-tests": TestHandlers.runTests,
 	"/api/generate-terrain": QueryHandlers.generateTerrain,
 	"/api/control-lighting": PropertyHandlers.controlLighting,
 	"/api/sync-project": ScriptHandlers.syncProject,
@@ -94,6 +116,8 @@ const routeMap: Record<string, Handler> = {
 	"/api/map-dependencies": ScriptHandlers.mapDependencies,
 	"/api/find-variable-leaks": ScriptHandlers.findVariableLeaks,
 	"/api/scan-anticheat": ScriptHandlers.scanAnticheat,
+	"/api/find-and-replace-in-scripts": ScriptHandlers.findAndReplaceInScripts,
+	"/api/get-script-analysis": ScriptHandlers.getScriptAnalysis,
 	"/api/auto-place": InstanceHandlers.autoPlace,
 	"/api/mirror-instances": InstanceHandlers.mirrorInstances,
 	"/api/snap-to-grid": PropertyHandlers.snapToGrid,
@@ -103,7 +127,6 @@ const routeMap: Record<string, Handler> = {
 	"/api/insert-comments": ScriptHandlers.insertComments,
 	"/api/fix-naming": InstanceHandlers.fixNaming,
 	"/api/build-cutscene": InstanceHandlers.buildCutscene,
-	"/api/generate-lod": BuildHandlers.generateLod,
 	"/api/simulate-physics": QueryHandlers.simulatePhysics,
 	"/api/generate-script": ScriptHandlers.generateScript,
 	"/api/diff-instances": InstanceHandlers.diffInstances,
@@ -124,6 +147,7 @@ function processRequest(request: RequestPayload): unknown {
 }
 
 function sendResponse(conn: Connection, requestId: string, responseData: unknown) {
+	if (!checkRateLimit()) return;
 	pcall(() => {
 		HttpService.RequestAsync({
 			Url: `${conn.serverUrl}/response`,
@@ -146,12 +170,14 @@ function pollForRequests(connIndex: number) {
 	const conn = State.getConnection(connIndex);
 	if (!conn || !conn.isActive) return;
 	if (conn.isPolling) return;
+	if (!checkRateLimit()) return;
 
 	conn.isPolling = true;
 
 	const [success, result] = pcall(() => {
+		const dataModel = RunService.IsEdit() ? "edit" : (RunService.IsServer() ? "server" : "client");
 		return HttpService.RequestAsync({
-			Url: `${conn.serverUrl}/poll`,
+			Url: `${conn.serverUrl}/poll?dataModel=${dataModel}`,
 			Method: "GET",
 			Headers: { "Content-Type": "application/json" },
 		});
@@ -167,8 +193,12 @@ function pollForRequests(connIndex: number) {
 		conn.currentRetryDelay = 0.5;
 		conn.lastSuccessfulConnection = tick();
 
-		const data = HttpService.JSONDecode(result.Body) as PollResponse;
-		const mcpConnected = data.mcpConnected === true;
+		const [decodeSuccess, data] = pcall(() => HttpService.JSONDecode(result.Body) as PollResponse);
+		if (!decodeSuccess) {
+			conn.lastHttpOk = false;
+			return;
+		}
+		const mcpConnected = data!.mcpConnected === true;
 		conn.lastHttpOk = true;
 
 		if (connIndex === State.getActiveTabIndex()) {
@@ -431,36 +461,9 @@ function deactivateAll() {
 	}
 }
 
-function checkForUpdates() {
-	task.spawn(() => {
-		const [success, result] = pcall(() => {
-			return HttpService.RequestAsync({
-				Url: "https://registry.npmjs.org/robloxstudio-mcp/latest",
-				Method: "GET",
-				Headers: { Accept: "application/json" },
-			});
-		});
-
-		if (success && result.Success) {
-			const [ok, data] = pcall(() => HttpService.JSONDecode(result.Body) as { version?: string });
-			if (ok && data?.version) {
-				const latestVersion = data.version;
-				if (Utils.compareVersions(State.CURRENT_VERSION, latestVersion) < 0) {
-					const ui = UI.getElements();
-					ui.updateBannerText.Text = `v${latestVersion} available - github.com/boshyxd/robloxstudio-mcp`;
-					ui.updateBanner.Visible = true;
-					ui.contentFrame.Position = new UDim2(0, 8, 0, 92);
-					ui.contentFrame.Size = new UDim2(1, -16, 1, -100);
-				}
-			}
-		}
-	});
-}
-
 export = {
 	getConnectionStatus,
 	activatePlugin,
 	deactivatePlugin,
 	deactivateAll,
-	checkForUpdates,
 };

@@ -104,7 +104,8 @@ function createObject(requestData: Record<string, unknown>) {
 
 		for (const [propertyName, propertyValue] of pairs(properties)) {
 			pcall(() => {
-				(instance as unknown as { [key: string]: unknown })[propertyName as string] = propertyValue;
+				const converted = convertPropertyValue(instance, propertyName as string, propertyValue);
+				(instance as unknown as { [key: string]: unknown })[propertyName as string] = converted;
 			});
 		}
 
@@ -182,7 +183,7 @@ function massCreateObjects(requestData: Record<string, unknown>) {
 		return { instance: newInstance as Instance, className, parentPath };
 	});
 
-	finishRecording(recordingId, successCount > 0, "mass_create_objects_with_properties");
+	finishRecording(recordingId, successCount > 0, "mass_create_objects");
 	return { results, summary: { total: (objects as defined[]).size(), succeeded: successCount, failed: failureCount } };
 }
 
@@ -451,8 +452,7 @@ function autoPlace(data: Record<string, unknown>): unknown {
 				results.push(getInstancePath(clone));
 			}
 			return { success: true, count: results.size(), paths: results };
-		}
- else if (action === "place_in_grid") {
+		} else if (action === "place_in_grid") {
 			const spacing = (data.spacing as number) || 10;
 			const count = (data.count as number) || 5;
 			const results: string[] = [];
@@ -567,26 +567,6 @@ function buildCutscene(data: Record<string, unknown>): unknown {
 	return { error: `Unknown action: ${action}` };
 }
 
-// === Feature 29: LOD Generator ===
-function generateLod(data: Record<string, unknown>): unknown {
-	const action = data.action as string;
-	const meshPath = data.mesh_path as string;
-	const mesh = getInstanceByPath(meshPath);
-	if (!mesh || !mesh.IsA("MeshPart")) return { error: "MeshPart not found" };
-
-	if (action === "create_lod_variants") {
-		const high = mesh.Clone();
-		high.Name = mesh.Name + "_LOD0";
-		high.Parent = mesh.Parent;
-		const low = mesh.Clone();
-		low.Name = mesh.Name + "_LOD1";
-		(low as any).RenderFidelity = Enum.RenderFidelity.Precise; // Mock reduction
-		low.Parent = mesh.Parent;
-		return { success: true, high: getInstancePath(high), low: getInstancePath(low) };
-	}
-	return { error: `Unknown action: ${action}` };
-}
-
 function diffInstances(requestData: Record<string, unknown>) {
 	const action = requestData.action as string;
 	const pathA = requestData.path_a as string;
@@ -662,6 +642,81 @@ function diffInstances(requestData: Record<string, unknown>) {
 	return { error: `Unknown action: ${action}` };
 }
 
+// === UI Studio ===
+function buildUi(requestData: Record<string, unknown>) {
+	const parentPath = requestData.parent as string;
+	const uiTree = requestData.ui as Record<string, unknown>;
+
+	if (!parentPath || !uiTree) {
+		return { error: "parent and ui are required" };
+	}
+
+	const parentInstance = getInstanceByPath(parentPath);
+	if (!parentInstance) {
+		return { error: `Parent not found: ${parentPath}` };
+	}
+
+	const recordingId = beginRecording("Build UI");
+	const createdPaths: string[] = [];
+	let errorCount = 0;
+
+	function createUiNode(node: Record<string, unknown>, parent: Instance): boolean {
+		const className = node.class as string;
+		const name = node.name as string | undefined;
+		const properties = (node.properties as Record<string, unknown>) ?? {};
+		const children = (node.children as Array<Record<string, unknown>>) ?? [];
+
+		if (!className) {
+			errorCount++;
+			return false;
+		}
+
+		const [success, instance] = pcall(() => {
+			const inst = new Instance(className as keyof CreatableInstances);
+			if (name) inst.Name = name;
+
+			for (const [propName, propValue] of pairs(properties)) {
+				pcall(() => {
+					const converted = convertPropertyValue(inst, propName as string, propValue);
+					(inst as unknown as { [key: string]: unknown })[propName as string] = converted;
+				});
+			}
+
+			inst.Parent = parent;
+			return inst;
+		});
+
+		if (!success || !instance) {
+			errorCount++;
+			return false;
+		}
+
+		createdPaths.push(getInstancePath(instance));
+
+		for (const child of children) {
+			createUiNode(child, instance);
+		}
+
+		return true;
+	}
+
+	createUiNode(uiTree, parentInstance);
+
+	if (createdPaths.size() > 0) {
+		finishRecording(recordingId, true, "build_ui");
+		return {
+			success: true,
+			created: createdPaths.size(),
+			errors: errorCount,
+			rootPath: createdPaths[0],
+			allPaths: createdPaths,
+		};
+	} else {
+		finishRecording(recordingId, false);
+		return { error: "Failed to create any UI elements", errors: errorCount };
+	}
+}
+
 export = {
 	createObject,
 	deleteObject,
@@ -674,6 +729,6 @@ export = {
 	mirrorInstances,
 	fixNaming,
 	buildCutscene,
-	generateLod,
 	diffInstances,
+	buildUi,
 };

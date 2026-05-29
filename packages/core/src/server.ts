@@ -4,6 +4,8 @@ import {
   CallToolRequestSchema,
   ErrorCode,
   ListToolsRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import http from 'http';
@@ -55,6 +57,61 @@ export class RobloxStudioMCPServer {
   }
 
   private setupToolHandlers() {
+    this.server.setRequestHandler(ListPromptsRequestSchema, async () => {
+      return {
+        prompts: [
+          {
+            name: "roblox_studio_workflow",
+            description: "Strict optimization rules for Roblox Studio MCP usage",
+            arguments: []
+          }
+        ]
+      };
+    });
+
+    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+      if (request.params.name === "roblox_studio_workflow") {
+        return {
+          description: "Strict optimization rules for Roblox Studio MCP usage",
+          messages: [
+            {
+              role: "user",
+              content: {
+                type: "text",
+                text: `Optimize the Roblox Studio MCP workflow with these strict rules:
+* NEVER scan the entire project automatically.
+* ONLY read files/services explicitly needed for the current task.
+* Cache previously analyzed results instead of rereading them.
+* Summarize large scripts before storing in memory.
+* Limit context window aggressively.
+* Do not repeatedly inspect unchanged files.
+* Avoid recursive analysis.
+* Stop deep reasoning after identifying a likely solution.
+* Prefer fast practical fixes over exhaustive analysis.
+* When debugging, inspect only the relevant script/function first.
+* If token usage becomes high, compress context into short summaries.
+* Never include full large source files unless absolutely necessary.
+* Use step-by-step execution instead of analyzing the whole game architecture.
+
+For Roblox Studio MCP specifically:
+* Read only targeted services (ServerScriptService, ReplicatedStorage, StarterGui, etc.) when required.
+* Do not enumerate every instance in the DataModel.
+* Avoid repeatedly querying descendants recursively.
+* Use focused searches by script name/path.
+* Store compact summaries of scripts instead of raw code.
+
+Behavior priority:
+FAST RESPONSE > PERFECT ANALYSIS
+
+If you detect long reasoning loops, immediately stop analysis and output the best practical answer.`
+              }
+            }
+          ]
+        };
+      }
+      throw new McpError(ErrorCode.MethodNotFound, `Unknown prompt: ${request.params.name}`);
+    });
+
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
         tools: this.config.tools.map(t => ({
@@ -103,6 +160,12 @@ export class RobloxStudioMCPServer {
           this.sharedApp.addActivityLog(logType, logMsg, JSON.stringify(args));
         }
 
+        // Extract dataModel from args and set on tools for request routing
+        const dataModel = (args as any)?.dataModel;
+        if (dataModel) {
+          this.tools.setDataModel(dataModel);
+        }
+
         switch (name) {
           case 'get_file_tree':
             return await this.tools.getFileTree((args as any)?.path || '');
@@ -133,10 +196,6 @@ export class RobloxStudioMCPServer {
             return await this.tools.massSetProperty((args as any)?.paths as string[], (args as any)?.propertyName as string, (args as any)?.propertyValue);
           case 'mass_get_property':
             return await this.tools.massGetProperty((args as any)?.paths as string[], (args as any)?.propertyName as string);
-          case 'set_calculated_property':
-            return await this.tools.setCalculatedProperty((args as any)?.paths as string[], (args as any)?.propertyName as string, (args as any)?.formula as string, (args as any)?.variables);
-          case 'set_relative_property':
-            return await this.tools.setRelativeProperty((args as any)?.paths as string[], (args as any)?.propertyName as string, (args as any)?.operation as any, (args as any)?.value, (args as any)?.component);
 
           case 'create_object':
             return await this.tools.createObject((args as any)?.className as string, (args as any)?.parent as string, (args as any)?.name, (args as any)?.properties);
@@ -150,15 +209,32 @@ export class RobloxStudioMCPServer {
             return await this.tools.massDuplicate((args as any)?.duplications as any[]);
 
           case 'get_script_source':
-            return await this.tools.getScriptSource((args as any)?.instancePath as string, (args as any)?.startLine, (args as any)?.endLine);
+            return await this.tools.getScriptSource((args as any)?.instancePath as string, (args as any)?.startLine, (args as any)?.endLine, (args as any)?.dataModel);
           case 'set_script_source':
-            return await this.tools.setScriptSource((args as any)?.instancePath as string, (args as any)?.source as string);
+            return await this.tools.setScriptSource((args as any)?.instancePath as string, (args as any)?.source as string, (args as any)?.dataModel);
           case 'edit_script_lines':
-            return await this.tools.editScriptLines((args as any)?.instancePath as string, (args as any)?.startLine as number, (args as any)?.endLine as number, (args as any)?.newContent as string);
+            return await this.tools.editScriptLines((args as any)?.instancePath as string, (args as any)?.old_string as string, (args as any)?.new_string as string, (args as any)?.dataModel);
           case 'insert_script_lines':
             return await this.tools.insertScriptLines((args as any)?.instancePath as string, (args as any)?.afterLine as number, (args as any)?.newContent as string);
           case 'delete_script_lines':
             return await this.tools.deleteScriptLines((args as any)?.instancePath as string, (args as any)?.startLine as number, (args as any)?.endLine as number);
+
+          case 'upload_decal':
+            return await this.tools.uploadDecal((args as any)?.filePath as string, (args as any)?.assetName as string, (args as any)?.description);
+          case 'simulate_mouse_input':
+            return await this.tools.simulateMouseInput(args);
+          case 'simulate_keyboard_input':
+            return await this.tools.simulateKeyboardInput(args);
+          case 'character_navigation':
+            return await this.tools.characterNavigation(args);
+          case 'find_and_replace_in_scripts':
+            return await this.tools.findAndReplaceInScripts(args);
+          case 'get_connected_instances':
+            return await this.tools.getConnectedInstances(args);
+          case 'get_script_analysis':
+            return await this.tools.getScriptAnalysis(args);
+          case 'get_output_log':
+            return await this.tools.getOutputLog(args);
 
           case 'get_attribute':
             return await this.tools.getAttribute((args as any)?.instancePath as string, (args as any)?.attributeName as string);
@@ -181,9 +257,18 @@ export class RobloxStudioMCPServer {
           case 'get_selection':
             return await this.tools.getSelection();
           case 'execute_luau':
-            return await this.tools.executeLuau((args as any)?.code as string);
+            return await this.tools.executeLuau((args as any)?.code as string, (args as any)?.timeout);
           case 'grep_scripts':
-            return await this.tools.grepScripts(args as any);
+            return await this.tools.grepScripts((args as any)?.pattern as string, {
+              caseSensitive: (args as any)?.caseSensitive,
+              usePattern: (args as any)?.usePattern,
+              contextLines: (args as any)?.contextLines,
+              maxResults: (args as any)?.maxResults,
+              maxResultsPerScript: (args as any)?.maxResultsPerScript,
+              filesOnly: (args as any)?.filesOnly,
+              path: (args as any)?.path,
+              classFilter: (args as any)?.classFilter,
+            });
 
           case 'start_playtest':
             return await this.tools.startPlaytest((args as any)?.mode as any);
@@ -200,7 +285,7 @@ export class RobloxStudioMCPServer {
             return await this.tools.historyControl((args as any)?.action as any, (args as any)?.waypoint_name);
 
           case 'export_build':
-            return await this.tools.exportBuild((args as any)?.instancePath as string, (args as any)?.style, (args as any)?.outputId);
+            return await this.tools.exportBuild((args as any)?.instancePath as string, (args as any)?.outputId, (args as any)?.style);
           case 'create_build':
             return await this.tools.createBuild(
               (args as any)?.id,
@@ -230,15 +315,17 @@ export class RobloxStudioMCPServer {
             return await this.tools.searchMaterials((args as any)?.query, (args as any)?.maxResults);
 
           case 'search_assets':
-            return await this.tools.searchAssets((args as any)?.assetType as any, (args as any)?.query as string, (args as any)?.sortBy as any, (args as any)?.verifiedCreatorsOnly);
+            return await this.tools.searchAssets((args as any)?.assetType as any, (args as any)?.query as string, (args as any)?.maxResults, (args as any)?.sortBy as any, (args as any)?.verifiedCreatorsOnly);
           case 'get_asset_details':
             return await this.tools.getAssetDetails((args as any)?.assetId as number);
           case 'get_asset_thumbnail':
             return await this.tools.getAssetThumbnail((args as any)?.assetId as number, (args as any)?.size as any);
           case 'insert_asset':
-            return await this.tools.insertAsset(args as any);
+            return await this.tools.insertAssetV2
+              ? await this.tools.insertAssetV2(args as any)
+              : await this.tools.insertAsset((args as any)?.assetId as number, (args as any)?.parentPath as string, (args as any)?.position);
           case 'preview_asset':
-            return await this.tools.previewAsset((args as any)?.assetId as number, (args as any)?.maxDepth, (args as any)?.includeProperties);
+            return await this.tools.previewAsset((args as any)?.assetId as number, (args as any)?.includeProperties, (args as any)?.maxDepth);
 
           case 'capture_screenshot':
             return await this.tools.captureScreenshot();
@@ -307,6 +394,31 @@ export class RobloxStudioMCPServer {
           case 'build_context':
             return await this.tools.buildContext(args as any);
 
+          case 'batch_execute':
+            return await this.tools.batchExecute((args as any)?.operations as any[]);
+          case 'bulk_get_scripts':
+            return await this.tools.bulkGetScripts((args as any)?.scripts as any[]);
+          case 'bulk_set_properties':
+            return await this.tools.bulkSetProperties((args as any)?.operations as any[]);
+
+          case 'manage_places':
+            return await this.tools.managePlaces(args as any);
+
+          case 'build_ui':
+            return await this.tools.buildUi(args as any);
+          case 'capture_ui':
+            return await this.tools.captureUi(args as any);
+          case 'get_ui_templates':
+            return await this.tools.getUiTemplates(args as any);
+
+          case 'sync_project_enhanced':
+            return await this.tools.syncProjectEnhanced(args as any);
+
+          case 'generate_test_report':
+            return await this.tools.generateTestReport(args as any);
+          case 'check_ui_design':
+            return await this.tools.checkUiDesign(args as any);
+
           default:
             throw new McpError(
               ErrorCode.MethodNotFound,
@@ -319,12 +431,15 @@ export class RobloxStudioMCPServer {
           ErrorCode.InternalError,
           `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`
         );
+      } finally {
+        this.tools.setDataModel(undefined);
       }
     });
   }
 
   async run() {
     const basePort = process.env.ROBLOX_STUDIO_PORT ? parseInt(process.env.ROBLOX_STUDIO_PORT) : 58741;
+    const maxAttempts = process.env.ROBLOX_STUDIO_PORT ? 1 : 5;
     const host = process.env.ROBLOX_STUDIO_HOST || '0.0.0.0';
     let bridgeMode: 'primary' | 'proxy' = 'primary';
     let httpHandle: http.Server | undefined;
@@ -336,7 +451,7 @@ export class RobloxStudioMCPServer {
 
     // Try to bind as primary
     try {
-      const result = await listenWithRetry(this.sharedApp, host, basePort, 5);
+      const result = await listenWithRetry(this.sharedApp, host, basePort, maxAttempts);
       httpHandle = result.server;
       boundPort = result.port;
       console.error(`HTTP server listening on ${host}:${boundPort} for Studio plugin (primary mode)`);

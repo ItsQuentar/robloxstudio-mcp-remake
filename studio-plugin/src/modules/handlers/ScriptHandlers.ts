@@ -77,10 +77,10 @@ function getScriptSource(requestData: Record<string, unknown>) {
 			truncated: false,
 		};
 
-		if (startLine === undefined && endLine === undefined && fullSource.size() > 50000) {
+		if (startLine === undefined && endLine === undefined && fullSource.size() > 15000) {
 			const truncatedLines: string[] = [];
 			const truncatedNumberedLines: string[] = [];
-			const maxLines = math.min(1000, lines.size());
+			const maxLines = math.min(250, lines.size());
 			for (let i = 0; i < maxLines; i++) {
 				truncatedLines.push(lines[i]);
 				truncatedNumberedLines.push(`${i + 1}: ${lines[i]}`);
@@ -89,7 +89,7 @@ function getScriptSource(requestData: Record<string, unknown>) {
 			resp.numberedSource = truncatedNumberedLines.join("\n");
 			resp.truncated = true;
 			resp.endLine = maxLines;
-			resp.note = "Script truncated to first 1000 lines. Use startLine/endLine parameters to read specific sections.";
+			resp.note = "Script truncated to first 250 lines (optimized for token efficiency). Use startLine/endLine parameters to read specific sections.";
 		}
 
 		if (instance.IsA("BaseScript")) {
@@ -193,15 +193,15 @@ function setScriptSource(requestData: Record<string, unknown>) {
 
 function editScriptLines(requestData: Record<string, unknown>) {
 	const instancePath = requestData.instancePath as string;
-	const startLine = requestData.startLine as number;
-	const endLine = requestData.endLine as number;
-	let newContent = requestData.newContent as string;
+	const old_string = requestData.old_string as string;
+	const new_string = requestData.new_string as string;
 
-	if (!instancePath || !startLine || !endLine || !newContent) {
-		return { error: "Instance path, startLine, endLine, and newContent are required" };
+	if (!instancePath || old_string === undefined || new_string === undefined) {
+		return { error: "Instance path, old_string, and new_string are required" };
 	}
 
-	newContent = normalizeEscapes(newContent);
+	const normalizedOld = normalizeEscapes(old_string);
+	const normalizedNew = normalizeEscapes(new_string);
 
 	const instance = getInstanceByPath(instancePath);
 	if (!instance) return { error: `Instance not found: ${instancePath}` };
@@ -209,32 +209,23 @@ function editScriptLines(requestData: Record<string, unknown>) {
 		return { error: `Instance is not a script-like object: ${instance.ClassName}` };
 	}
 
-	const recordingId = beginRecording(`Edit script lines ${startLine}-${endLine}: ${instance.Name}`);
+	const recordingId = beginRecording(`Edit script: ${instance.Name}`);
 
 	const [success, result] = pcall(() => {
-		const [lines, hadTrailingNewline] = splitLines(readScriptSource(instance));
-		const totalLines = lines.size();
+		const source = readScriptSource(instance);
+		// Simple literal replacement
+		const [newSource, count] = source.gsub(normalizedOld.gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")[0], normalizedNew.gsub("%%", "%%%%")[0]);
 
-		if (startLine < 1 || startLine > totalLines) error(`startLine out of range (1-${totalLines})`);
-		if (endLine < startLine || endLine > totalLines) error(`endLine out of range (${startLine}-${totalLines})`);
+		if (count === 0) {
+			error(`String not found in script: ${normalizedOld}`);
+		}
 
-		const [newLines] = splitLines(newContent);
-		const resultLines: string[] = [];
-
-		for (let i = 0; i < startLine - 1; i++) resultLines.push(lines[i]);
-		for (const line of newLines) resultLines.push(line);
-		for (let i = endLine; i < totalLines; i++) resultLines.push(lines[i]);
-
-		const newSource = joinLines(resultLines, hadTrailingNewline);
 		ScriptEditorService.UpdateSourceAsync(instance, () => newSource);
 
 		return {
 			success: true, instancePath,
-			editedLines: { startLine, endLine },
-			linesRemoved: endLine - startLine + 1,
-			linesAdded: newLines.size(),
-			newLineCount: resultLines.size(),
-			message: "Script lines edited successfully",
+			replacements: count,
+			message: `Successfully replaced ${count} occurrence(s)`,
 		};
 	});
 
@@ -243,7 +234,58 @@ function editScriptLines(requestData: Record<string, unknown>) {
 		return result;
 	}
 	finishRecording(recordingId, false);
-	return { error: `Failed to edit script lines: ${result}` };
+	return { error: `Failed to edit script: ${result}` };
+}
+
+function findAndReplaceInScripts(requestData: Record<string, unknown>) {
+	const findPattern = requestData.find_pattern as string;
+	const replaceWith = requestData.replace_with as string;
+	const pathScope = (requestData.path_scope as string) || "game";
+	const caseSensitive = requestData.case_sensitive as boolean;
+	const isPattern = requestData.is_pattern as boolean;
+
+	const root = getInstanceByPath(pathScope);
+	if (!root) return { error: `Scope path not found: ${pathScope}` };
+
+	const scripts: LuaSourceContainer[] = [];
+	for (const obj of root.GetDescendants()) {
+		if (obj.IsA("LuaSourceContainer")) scripts.push(obj);
+	}
+	if (root.IsA("LuaSourceContainer")) scripts.push(root);
+
+	const results: Array<{ path: string; replacements: number }> = [];
+	let totalReplacements = 0;
+
+	const findEscaped = isPattern ? findPattern : findPattern.gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")[0];
+	const replaceEscaped = replaceWith.gsub("%%", "%%%%")[0];
+
+	for (const s of scripts) {
+		const source = readScriptSource(s);
+		const [newSource, count] = source.gsub(findEscaped, replaceEscaped);
+		if (count > 0) {
+			pcall(() => ScriptEditorService.UpdateSourceAsync(s, () => newSource));
+			results.push({ path: getInstancePath(s), replacements: count });
+			totalReplacements += count;
+		}
+	}
+
+	return { success: true, totalReplacements, affectedScripts: results.size(), details: results };
+}
+
+function getScriptAnalysis(requestData: Record<string, unknown>) {
+	const scriptPath = requestData.scriptPath as string;
+	const instance = getInstanceByPath(scriptPath);
+	if (!instance || !instance.IsA("LuaSourceContainer")) return { error: "Invalid script path" };
+
+	// GetScriptAnalysisAsync returns a table of analysis results
+	const [success, result] = pcall(() => {
+		const service = ScriptEditorService as unknown as { GetScriptAnalysisAsync: (inst: Instance) => unknown };
+		return service.GetScriptAnalysisAsync(instance);
+	});
+	if (success) {
+		return { success: true, analysis: result };
+	}
+	return { error: `Analysis failed: ${result}` };
 }
 
 function insertScriptLines(requestData: Record<string, unknown>) {
@@ -459,10 +501,6 @@ function mapDependencies(requestData: Record<string, unknown>) {
 		return { success: true, dependencies: deps };
 	}
 
-	if (action === "find_circular") {
-		return { success: true, circular: [], note: "Full graph analysis not implemented" };
-	}
-
 	return { error: `Unknown action: ${action}` };
 }
 
@@ -475,12 +513,32 @@ function findVariableLeaks(requestData: Record<string, unknown>) {
 		const source = readScriptSource(inst);
 		const [lines] = splitLines(source);
 		const leaks: Array<{ line: number; content: string }> = [];
+		let inBlockComment = false;
 
 		lines.forEach((line, i) => {
+			const trimmed = line.gsub("^%s+", "")[0] as string;
+
+			if (inBlockComment) {
+				if (trimmed.find("%]%]")[0]) inBlockComment = false;
+				return;
+			}
+			if (trimmed.sub(1, 4) === "--[[") {
+				if (!trimmed.find("%]%]")[0]) inBlockComment = true;
+				return;
+			}
+			if (trimmed.sub(1, 2) === "--") return;
+
 			const [match1] = string.match(line, "^%s*([%a_][%w_]*)%s*=");
 			const [match2] = string.match(line, "^%s*(local)%s");
-			if (match1 && !match2) {
-				leaks.push({ line: i + 1, content: line.gsub("^%s+", "")[0].gsub("%s+$", "")[0] });
+			const [match3] = string.match(line, "^%s*(function)%s");
+			const [match4] = string.match(line, "%.");
+			const [match5] = string.match(line, "^%s*(return)%s");
+			const [match6] = string.match(line, "^%s*(end)");
+			const [match7] = string.match(line, "^%s*(else)");
+			const [match8] = string.match(line, "^%s*(elseif)%s");
+
+			if (match1 && !match2 && !match3 && !match4 && !match5 && !match6 && !match7 && !match8) {
+				leaks.push({ line: i + 1, content: trimmed.gsub("%s+$", "")[0] as string });
 			}
 		});
 		return leaks;
@@ -555,9 +613,30 @@ function insertComments(requestData: Record<string, unknown>) {
 	if (action === "remove_comments") {
 		const [lines] = splitLines(source);
 		const newLines: string[] = [];
+		let inBlockComment = false;
+
 		for (const l of lines) {
-			if (!l.match("^%s*%-%-")) newLines.push(l);
+			const trimmed = l.match("^%s*(.*)")[0] as string || "";
+
+			if (inBlockComment) {
+				if (trimmed.find("%]%]")[0]) {
+					inBlockComment = false;
+				}
+				continue;
+			}
+
+			if (trimmed.sub(1, 4) === "--[[") {
+				if (!trimmed.find("%]%]")[0]) {
+					inBlockComment = true;
+				}
+				continue;
+			}
+
+			if (trimmed.sub(1, 2) === "--") continue;
+
+			newLines.push(l);
 		}
+
 		const newSource = newLines.join("\n");
 		const [ok] = pcall(() => {
 			ScriptEditorService.UpdateSourceAsync(instance, () => newSource);
@@ -628,4 +707,6 @@ export = {
 	scanAnticheat,
 	insertComments,
 	generateScript,
+	findAndReplaceInScripts,
+	getScriptAnalysis,
 };

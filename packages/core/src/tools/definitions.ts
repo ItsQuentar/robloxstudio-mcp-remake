@@ -12,13 +12,18 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'get_file_tree',
     category: 'read',
-    description: 'Get instance hierarchy tree from Studio',
+    description: 'Get instance hierarchy tree. DO NOT scan game root automatically. Target specific services.',
     inputSchema: {
       type: 'object',
       properties: {
         path: {
           type: 'string',
           description: 'Root path (default: game root)'
+        },
+        dataModel: {
+          type: 'string',
+          enum: ['edit', 'server', 'client'],
+          description: 'Target DataModel context (default: edit)'
         }
       }
     }
@@ -26,7 +31,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'search_files',
     category: 'read',
-    description: 'Search instances by name, class, or script content',
+    description: 'Search instances. MAX 100 results. Use focused searches by script name/path instead of broad queries.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -108,6 +113,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         excludeSource: {
           type: 'boolean',
           description: 'For scripts, return SourceLength/LineCount instead of full source (default: false)'
+        },
+        dataModel: {
+          type: 'string',
+          enum: ['edit', 'server', 'client'],
+          description: 'Target DataModel context (default: edit)'
         }
       },
       required: ['instancePath']
@@ -167,7 +177,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'get_project_structure',
     category: 'read',
-    description: 'Get full game hierarchy tree. Increase maxDepth (default 3) for deeper traversal.',
+    description: 'Get game hierarchy tree. STRICT RULES: Use maxDepth=1 or 2. NEVER scan the entire project. Only read targeted services (e.g. game.ServerScriptService). Stop deep reasoning if token usage is high.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -205,6 +215,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         },
         propertyValue: {
           description: 'Value to set (string, number, boolean, or object for Vector3/Color3/UDim2)'
+        },
+        dataModel: {
+          type: 'string',
+          enum: ['edit', 'server', 'client'],
+          description: 'Target DataModel context (default: edit)'
         }
       },
       required: ['instancePath', 'propertyName', 'propertyValue']
@@ -277,6 +292,11 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         properties: {
           type: 'object',
           description: 'Properties to set on creation'
+        },
+        dataModel: {
+          type: 'string',
+          enum: ['edit', 'server', 'client'],
+          description: 'Target DataModel context (default: edit)'
         }
       },
       required: ['className', 'parent']
@@ -451,69 +471,6 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     }
   },
 
-  // === Calculated/Relative Properties ===
-  {
-    name: 'set_calculated_property',
-    category: 'write',
-    description: 'Set properties via formula (e.g. "index * 50")',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        paths: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Instance paths'
-        },
-        propertyName: {
-          type: 'string',
-          description: 'Property name'
-        },
-        formula: {
-          type: 'string',
-          description: 'Formula expression'
-        },
-        variables: {
-          type: 'object',
-          description: 'Additional formula variables'
-        }
-      },
-      required: ['paths', 'propertyName', 'formula']
-    }
-  },
-  {
-    name: 'set_relative_property',
-    category: 'write',
-    description: 'Modify properties relative to current values',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        paths: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Instance paths'
-        },
-        propertyName: {
-          type: 'string',
-          description: 'Property name'
-        },
-        operation: {
-          type: 'string',
-          enum: ['add', 'multiply', 'divide', 'subtract', 'power'],
-          description: 'Operation'
-        },
-        value: {
-          description: 'Operand value (number or object for Vector3/UDim2 components)'
-        },
-        component: {
-          type: 'string',
-          enum: ['X', 'Y', 'Z', 'XScale', 'XOffset', 'YScale', 'YOffset'],
-          description: 'Vector3/UDim2 component'
-        }
-      },
-      required: ['paths', 'propertyName', 'operation', 'value']
-    }
-  },
-
   // === Script Read/Write ===
   {
     name: 'get_script_source',
@@ -560,7 +517,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'edit_script_lines',
     category: 'write',
-    description: 'Replace a range of lines. 1-indexed, inclusive. Use numberedSource for line numbers.',
+    description: 'Replace all occurrences of old_string with new_string in a script. For line-based edits, use set_script_source or insert/delete_script_lines.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -568,20 +525,16 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
           type: 'string',
           description: 'Script instance path'
         },
-        startLine: {
-          type: 'number',
-          description: 'Start line (1-indexed)'
-        },
-        endLine: {
-          type: 'number',
-          description: 'End line (inclusive)'
-        },
-        newContent: {
+        old_string: {
           type: 'string',
-          description: 'Replacement content'
+          description: 'String to find and replace'
+        },
+        new_string: {
+          type: 'string',
+          description: 'Replacement string'
         }
       },
-      required: ['instancePath', 'startLine', 'endLine', 'newContent']
+      required: ['instancePath', 'old_string', 'new_string']
     }
   },
   {
@@ -1263,34 +1216,6 @@ part(0,2,0,2,1,1,"b")`,
     }
   },
   {
-    name: 'insert_asset',
-    category: 'write',
-    description: 'Insert a Roblox asset into Studio by loading it via AssetService and parenting it to a target location. Optionally set position.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        assetId: {
-          type: 'number',
-          description: 'The Roblox asset ID to insert'
-        },
-        parentPath: {
-          type: 'string',
-          description: 'Parent instance path (default: game.Workspace)'
-        },
-        position: {
-          type: 'object',
-          properties: {
-            x: { type: 'number' },
-            y: { type: 'number' },
-            z: { type: 'number' }
-          },
-          description: 'Optional world position to place the asset'
-        }
-      },
-      required: ['assetId']
-    }
-  },
-  {
     name: 'preview_asset',
     category: 'read',
     description: 'Preview a Roblox asset without permanently inserting it. Loads the asset, builds a hierarchy tree with properties and summary stats, then destroys it. Useful for inspecting asset contents before insertion.',
@@ -1783,30 +1708,6 @@ part(0,2,0,2,1,1,"b")`,
       required: ['action', 'target_path']
     }
   },
-  {
-    name: 'manage_places',
-    category: 'read',
-    description: 'Manage multiple places and Studio contexts.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          enum: ['list_places', 'get_active_place', 'switch_context', 'get_place_info'],
-          description: 'Action to perform'
-        },
-        place_id: {
-          type: 'number',
-          description: 'Roblox PlaceId'
-        },
-        window_index: {
-          type: 'number',
-          description: 'Index of the Studio window to target'
-        }
-      },
-      required: ['action']
-    }
-  },
 
   // === Remote Event Monitor ===
   {
@@ -2103,28 +2004,6 @@ part(0,2,0,2,1,1,"b")`,
     }
   },
 
-  // === LOD Generator ===
-  {
-    name: 'generate_lod',
-    category: 'write',
-    description: 'Generate Level of Detail (LOD) variants for meshes',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          enum: ['create_lod_variants', 'setup_lod_script', 'list_lod_groups'],
-          description: 'Action to perform'
-        },
-        mesh_path: { type: 'string' },
-        distances: {
-          type: 'object',
-          properties: { high: { type: 'number' }, mid: { type: 'number' }, low: { type: 'number' } }
-        }
-      },
-      required: ['action', 'mesh_path']
-    }
-  },
 
   // === Physics Simulator ===
   {
@@ -2237,6 +2116,246 @@ part(0,2,0,2,1,1,"b")`,
         }
       },
       required: ['action']
+    }
+  },
+
+  // === Bulk Operations ===
+  {
+    name: 'batch_execute',
+    category: 'write',
+    description: 'Execute multiple tool calls in a single request. Runs sequentially, returns all results. Saves tokens by batching operations.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        operations: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              tool: { type: 'string', description: 'Tool name to execute' },
+              params: { type: 'object', description: 'Parameters for the tool' }
+            },
+            required: ['tool']
+          },
+          description: 'List of tool calls to execute sequentially'
+        }
+      },
+      required: ['operations']
+    }
+  },
+  {
+    name: 'bulk_get_scripts',
+    category: 'read',
+    description: 'Read multiple script sources in a single call. More token-efficient than calling get_script_source multiple times.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scripts: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'Script instance path' },
+              startLine: { type: 'number', description: 'Optional start line (1-indexed)' },
+              endLine: { type: 'number', description: 'Optional end line (inclusive)' }
+            },
+            required: ['path']
+          },
+          description: 'List of scripts to read'
+        }
+      },
+      required: ['scripts']
+    }
+  },
+  {
+    name: 'bulk_set_properties',
+    category: 'write',
+    description: 'Set different properties on different instances in a single call. More token-efficient than calling set_property multiple times.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        operations: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'Instance path' },
+              property: { type: 'string', description: 'Property name' },
+              value: { description: 'Property value (number, string, or object for Vector3/Color3/UDim2/CFrame)' }
+            },
+            required: ['path', 'property', 'value']
+          },
+          description: 'List of property changes to apply'
+        }
+      },
+      required: ['operations']
+    }
+  },
+
+  // === Multi-Place Management ===
+  {
+    name: 'manage_places',
+    category: 'read',
+    description: 'Manage multiple Roblox Studio places. List connected places, switch active place, get place info.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['list_places', 'get_active_place', 'switch_place', 'set_place_name'],
+          description: 'Action to perform'
+        },
+        placeId: {
+          type: 'number',
+          description: 'Roblox PlaceId (for switch_place and set_place_name)'
+        },
+        placeName: {
+          type: 'string',
+          description: 'Friendly name for the place (for set_place_name)'
+        }
+      },
+      required: ['action']
+    }
+  },
+
+  // === UI Studio ===
+  {
+    name: 'build_ui',
+    category: 'write',
+    description: 'Create a complete UI hierarchy from a JSON tree. Single call creates ScreenGui, Frames, TextLabels, Buttons, etc. Supports UDim2, Color3, Vector2 properties.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        parent: {
+          type: 'string',
+          description: 'Parent instance path (e.g., game.StarterGui)'
+        },
+        ui: {
+          type: 'object',
+          description: 'UI tree structure. Each node has: class (required), name, properties, children (array of child nodes)',
+          properties: {
+            class: { type: 'string', description: 'Roblox UI class (ScreenGui, Frame, TextLabel, TextButton, ImageLabel, etc.)' },
+            name: { type: 'string', description: 'Instance name' },
+            properties: { type: 'object', description: 'Properties to set (Size, Position, BackgroundColor3, etc.)' },
+            children: { type: 'array', description: 'Child UI elements (nested same structure)' }
+          },
+          required: ['class']
+        }
+      },
+      required: ['parent', 'ui']
+    }
+  },
+  {
+    name: 'capture_ui',
+    category: 'read',
+    description: 'Capture a screenshot of the current game UI for preview. Returns base64 image data.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        width: { type: 'number', description: 'Image width (default: 1920)' },
+        height: { type: 'number', description: 'Image height (default: 1080)' }
+      }
+    }
+  },
+  {
+    name: 'get_ui_templates',
+    category: 'read',
+    description: 'Get pre-built UI templates for common patterns (health_bar, inventory_grid, dialog_box, hotbar, scoreboard, notification). Returns JSON that can be passed to build_ui.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        template: {
+          type: 'string',
+          enum: ['health_bar', 'inventory_grid', 'dialog_box', 'hotbar', 'scoreboard', 'notification', 'all'],
+          description: 'Template name or "all" for all templates'
+        }
+      },
+      required: ['template']
+    }
+  },
+
+  // === Bidirectional Sync ===
+  {
+    name: 'sync_project_enhanced',
+    category: 'write',
+    description: 'Bidirectional sync between Studio scripts and local files. Setup sync, detect changes, push to Studio, or pull to local.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['setup_sync', 'get_changes', 'sync_to_studio', 'sync_to_local', 'toggle_auto_sync'],
+          description: 'Sync action to perform'
+        },
+        project_dir: { type: 'string', description: 'Local project directory path (for setup_sync)' },
+        sync_roots: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Instance paths to sync (e.g., ["game.ServerScriptService", "game.ReplicatedStorage"])'
+        },
+        auto_sync: { type: 'boolean', description: 'Enable automatic sync on file changes' },
+        files: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Instance paths to sync to Studio (for sync_to_studio)'
+        },
+        scripts: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Instance paths to sync to local (for sync_to_local). Empty = all.'
+        }
+      },
+      required: ['action']
+    }
+  },
+
+  // === Test Report ===
+  {
+    name: 'generate_test_report',
+    category: 'write',
+    description: 'Run a playtest, collect logs and errors, generate a local test report file. Returns JSON summary and saves readable report to disk.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: {
+          type: 'string',
+          enum: ['play', 'run'],
+          description: 'Playtest mode (default: run)'
+        },
+        duration: {
+          type: 'number',
+          description: 'How long to run playtest in seconds before collecting results (default: 5)'
+        },
+        output_path: {
+          type: 'string',
+          description: 'Local file path to save report (default: ./test-report.json)'
+        },
+        test_name: {
+          type: 'string',
+          description: 'Name for this test run'
+        }
+      }
+    }
+  },
+
+  // === UI Design Check ===
+  {
+    name: 'check_ui_design',
+    category: 'read',
+    description: 'Analyze existing UI in StarterGui. Check layout, readability, touch targets, safe areas, accessibility. Returns suggestions for improvement.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        instancePath: {
+          type: 'string',
+          description: 'UI root path to analyze (e.g., game.StarterGui.MyGui). If not specified, analyzes all of StarterGui.'
+        },
+        checks: {
+          type: 'array',
+          items: { type: 'string', enum: ['layout', 'readability', 'touch_targets', 'safe_areas', 'accessibility', 'all'] },
+          description: 'Which checks to run (default: all)'
+        }
+      }
     }
   }
 ];

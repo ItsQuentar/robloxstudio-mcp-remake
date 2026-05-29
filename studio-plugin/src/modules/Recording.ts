@@ -42,21 +42,17 @@ function finishRecording(recordingId: RecordingId, shouldCommit: boolean, toolNa
 		ChangeHistoryService.FinishRecording(recordingId, operation);
 	});
 
-	print(`MCP Recording: finishRecording called for ${toolName || "unknown"}. isTracking=${state.isTracking}`);
-
 	if (state.isTracking) {
 		state.changeLog.push({
 			time: tick(),
 			tool: toolName || "Unknown Tool",
 			success: shouldCommit,
 		});
-		print(`MCP Recording: Added log entry. Total entries: ${state.changeLog.size()}`);
 	}
 }
 
 function setTracking(enabled: boolean) {
 	state.isTracking = enabled;
-	print(`MCP Recording: isTracking set to ${enabled}`);
 }
 
 function getLog() {

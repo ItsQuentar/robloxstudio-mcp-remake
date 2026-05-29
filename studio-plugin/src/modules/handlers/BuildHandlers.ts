@@ -272,7 +272,7 @@ function importBuild(requestData: Record<string, unknown>) {
 			if (paletteEntry) {
 				const [colorName, materialName, variantName] = paletteEntry;
 				pcall(() => {
-					part.BrickColor = new BrickColor(colorName as unknown as number);
+					part.BrickColor = (BrickColor as unknown as { new: (name: string) => BrickColor }).new(colorName);
 				});
 				pcall(() => {
 					const mat = MATERIAL_BY_NAME.get(materialName);
@@ -391,7 +391,7 @@ function importScene(requestData: Record<string, unknown>) {
 				if (paletteEntry) {
 					const [colorName, materialName, variantName] = paletteEntry;
 					pcall(() => {
-						part.BrickColor = new BrickColor(colorName as unknown as number);
+						part.BrickColor = (BrickColor as unknown as { new: (name: string) => BrickColor }).new(colorName);
 					});
 					pcall(() => {
 						const mat = MATERIAL_BY_NAME.get(materialName);
@@ -486,10 +486,6 @@ function buildLibraryAdvanced(data: Record<string, unknown>): unknown {
 		const HttpService = game.GetService("HttpService");
 		const buildData = HttpService.JSONDecode(data.json_data as string);
 		return importBuild({ buildData, targetPath: (data.target_path as string) || "game.Workspace" });
-	} else if (action === "list_saved_builds") {
-		return { error: "list_saved_builds must be handled by server (file system)" };
-	} else if (action === "save_build") {
-		return { success: true, message: "Server should save this JSON to builds folder" };
 	}
 	return { error: `Unknown action: ${action}` };
 }

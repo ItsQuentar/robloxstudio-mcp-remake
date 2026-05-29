@@ -1,6 +1,6 @@
 {
   "name": "robloxstudio-mcp-remake",
-  "version": "1.0.0",
+  "version": "1.1.2",
   "private": false,
   "description": "Roblox Studio MCP server with 92+ tools for AI-powered game development",
   "main": "dist/index.js",
@@ -10,10 +10,11 @@
   },
   "files": [
     "dist/**/*",
+    "dist/roblox-mcp-dashboard.html",
     "studio-plugin/**/*"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node -e \"const fs = require('fs'); fs.mkdirSync('dist', { recursive: true }); fs.copyFileSync('src/dashboard.html', 'dist/roblox-mcp-dashboard.html')\"",
     "prepack": "node ../../scripts/prepack.mjs",
     "postpack": "node ../../scripts/postpack.mjs"
   },

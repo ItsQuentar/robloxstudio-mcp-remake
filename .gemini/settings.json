@@ -2,7 +2,7 @@
   "mcpServers": {
     "roblox": {
       "command": "node",
-      "args": ["packages/robloxstudio-mcp/dist/index.js"]
+      "args": ["packages/robloxstudio-mcp-remake/dist/index.js"]
     }
   }
 }

@@ -21,8 +21,6 @@ interface UIElements {
 	step3Dot: Frame;
 	step3Label: TextLabel;
 	troubleshootLabel: TextLabel;
-	updateBanner: Frame;
-	updateBannerText: TextLabel;
 	tabBar: Frame;
 }
 
@@ -88,15 +86,24 @@ function setButtonDisconnect(btn: TextButton, stroke: UIStroke) {
 }
 
 function stopPulseAnimation() {
+	if (pulseAnimation) {
+		pulseAnimation.Cancel();
+		pulseAnimation = undefined;
+	}
 	elements.statusPulse.Size = new UDim2(0, 10, 0, 10);
 	elements.statusPulse.Position = new UDim2(0, 0, 0, 0);
 	elements.statusPulse.BackgroundTransparency = 0.7;
 }
 
 function startPulseAnimation() {
-	elements.statusPulse.Size = new UDim2(0, 10, 0, 10);
-	elements.statusPulse.Position = new UDim2(0, 0, 0, 0);
-	elements.statusPulse.BackgroundTransparency = 0.7;
+	stopPulseAnimation();
+	const tweenInfo = new TweenInfo(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.Out, -1, false);
+	pulseAnimation = TweenService.Create(elements.statusPulse, tweenInfo, {
+		Size: new UDim2(0, 24, 0, 24),
+		Position: new UDim2(0, -7, 0, -7),
+		BackgroundTransparency: 1,
+	});
+	pulseAnimation.Play();
 }
 
 let refreshTabBar: () => void;
@@ -266,7 +273,7 @@ function init(pluginRef: Plugin) {
 	titleLabel.Position = new UDim2(0, 12, 0, 6);
 	titleLabel.BackgroundTransparency = 1;
 	titleLabel.RichText = true;
-	titleLabel.Text = `<font color="#00A2FF">Boshyxd Plugin Remake</font> <font color="#94A3B8">v${CURRENT_VERSION}</font>`;
+	titleLabel.Text = `<font color="#00A2FF">ItsQuentar Plugin Remake</font> <font color="#94A3B8">v${CURRENT_VERSION}</font>`;
 	titleLabel.TextColor3 = C.white;
 	titleLabel.TextSize = 14;
 	titleLabel.Font = Enum.Font.GothamBold;
@@ -278,7 +285,7 @@ function init(pluginRef: Plugin) {
 	creditsLabel.Position = new UDim2(0, 12, 0, 26);
 	creditsLabel.BackgroundTransparency = 1;
 	creditsLabel.RichText = true;
-	creditsLabel.Text = '<font color="#94A3B8">Remake by</font> <font color="#00A2FF">ItsQuentar</font> <font color="#64748B">|</font> <font color="#CBD5E1">Glass Edition</font>';
+	creditsLabel.Text = '<font color="#94A3B8">Remake by ItsQuentar | Original by BoshyXd</font>';
 	creditsLabel.TextColor3 = C.muted;
 	creditsLabel.TextSize = 9;
 	creditsLabel.Font = Enum.Font.GothamMedium;
@@ -369,30 +376,6 @@ function init(pluginRef: Plugin) {
 			switchToTab(newIndex);
 		}
 	});
-
-	const updateBanner = new Instance("Frame");
-	updateBanner.Size = new UDim2(1, -20, 0, 26);
-	updateBanner.Position = new UDim2(0, 10, 0, 78);
-	updateBanner.BackgroundColor3 = Color3.fromRGB(0, 100, 255);
-	updateBanner.BackgroundTransparency = 0.8;
-	updateBanner.BorderSizePixel = 0;
-	updateBanner.Visible = false;
-	updateBanner.Parent = mainFrame;
-
-	const updateBannerCorner = new Instance("UICorner");
-	updateBannerCorner.CornerRadius = new UDim(0, 4);
-	updateBannerCorner.Parent = updateBanner;
-
-	const updateBannerText = new Instance("TextLabel");
-	updateBannerText.Size = new UDim2(1, -20, 1, 0);
-	updateBannerText.Position = new UDim2(0, 10, 0, 0);
-	updateBannerText.BackgroundTransparency = 1;
-	updateBannerText.Text = "";
-	updateBannerText.TextColor3 = C.white;
-	updateBannerText.TextSize = 10;
-	updateBannerText.Font = Enum.Font.GothamMedium;
-	updateBannerText.TextXAlignment = Enum.TextXAlignment.Left;
-	updateBannerText.Parent = updateBanner;
 
 	const contentY = 82;
 	const contentFrame = new Instance("ScrollingFrame");
@@ -606,7 +589,7 @@ function init(pluginRef: Plugin) {
 		screenGui, mainFrame, contentFrame, statusLabel, detailStatusLabel,
 		statusIndicator, statusPulse, statusText, connectButton, connectStroke,
 		urlInput, step1Dot, step1Label, step2Dot, step2Label, step3Dot, step3Label,
-		troubleshootLabel, updateBanner, updateBannerText, tabBar,
+		troubleshootLabel, tabBar,
 	};
 
 	refreshTabBar();

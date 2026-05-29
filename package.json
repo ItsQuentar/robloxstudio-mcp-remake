@@ -1,7 +1,7 @@
 {
   "name": "robloxstudio-mcp-monorepo",
   "version": "1.0.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "workspaces": [
     "packages/*"

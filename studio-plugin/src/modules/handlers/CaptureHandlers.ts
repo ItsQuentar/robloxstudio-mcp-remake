@@ -1,3 +1,5 @@
+import Utils from "../Utils";
+
 const CaptureService = game.GetService("CaptureService");
 const AssetService = game.GetService("AssetService");
 
@@ -119,9 +121,6 @@ function captureViewport(data: Record<string, unknown>): unknown {
 
 	if (action === "capture_with_overlay" && highlightPath) {
 		const Selection = game.GetService("Selection");
-		const Utils = require(script.Parent!.Parent!.WaitForChild("Utils") as ModuleScript) as unknown as {
-			getInstanceByPath(path: string): Instance | undefined;
-		};
 		const instance = Utils.getInstanceByPath(highlightPath);
 		if (instance) {
 			const oldSelection = Selection.Get();

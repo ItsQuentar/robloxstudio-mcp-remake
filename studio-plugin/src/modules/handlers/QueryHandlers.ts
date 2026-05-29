@@ -63,7 +63,8 @@ function searchFiles(requestData: Record<string, unknown>) {
 
 	const results: { name: string; className: string; path: string; hasSource: boolean; enabled?: boolean }[] = [];
 
-	function searchRecursive(instance: Instance) {
+	function searchRecursive(instance: Instance, depth: number) {
+		if (results.size() >= 100 || depth > 10) return;
 		let match = false;
 
 		if (searchType === "name") {
@@ -88,11 +89,11 @@ function searchFiles(requestData: Record<string, unknown>) {
 		}
 
 		for (const child of instance.GetChildren()) {
-			searchRecursive(child);
+			searchRecursive(child, depth + 1);
 		}
 	}
 
-	searchRecursive(game);
+	searchRecursive(game, 0);
 
 	return { results, query, searchType, count: results.size() };
 }
@@ -160,7 +161,8 @@ function searchObjects(requestData: Record<string, unknown>) {
 
 	const results: { name: string; className: string; path: string }[] = [];
 
-	function searchRecursive(instance: Instance) {
+	function searchRecursive(instance: Instance, depth: number) {
+		if (results.size() >= 100 || depth > 10) return;
 		let match = false;
 
 		if (searchType === "name") {
@@ -183,11 +185,11 @@ function searchObjects(requestData: Record<string, unknown>) {
 		}
 
 		for (const child of instance.GetChildren()) {
-			searchRecursive(child);
+			searchRecursive(child, depth + 1);
 		}
 	}
 
-	searchRecursive(game);
+	searchRecursive(game, 0);
 
 	return { results, query, searchType, count: results.size() };
 }
@@ -338,7 +340,8 @@ function searchByProperty(requestData: Record<string, unknown>) {
 
 	const results: { name: string; className: string; path: string; propertyValue: string }[] = [];
 
-	function searchRecursive(instance: Instance) {
+	function searchRecursive(instance: Instance, depth: number) {
+		if (results.size() >= 100 || depth > 10) return;
 		const [success, value] = pcall(() => tostring((instance as unknown as Record<string, unknown>)[propertyName]));
 		if (success && (value as string).lower().find(propertyValue.lower())[0] !== undefined) {
 			results.push({
@@ -349,11 +352,11 @@ function searchByProperty(requestData: Record<string, unknown>) {
 			});
 		}
 		for (const child of instance.GetChildren()) {
-			searchRecursive(child);
+			searchRecursive(child, depth + 1);
 		}
 	}
 
-	searchRecursive(game);
+	searchRecursive(game, 0);
 	return { propertyName, propertyValue, results, count: results.size() };
 }
 
@@ -549,6 +552,67 @@ function getProjectStructure(requestData: Record<string, unknown>) {
 	result.timestamp = tick();
 
 	return result;
+}
+
+interface JointLike {
+	Part0: BasePart | undefined;
+	Part1: BasePart | undefined;
+}
+
+function getConnectedInstances(requestData: Record<string, unknown>) {
+	const instancePath = requestData.instancePath as string;
+	const connectionType = (requestData.connectionType as string) || "touches";
+
+	const instance = getInstanceByPath(instancePath);
+	if (!instance) return { error: `Instance not found: ${instancePath}` };
+
+	const results: string[] = [];
+	if (instance.IsA("BasePart")) {
+		if (connectionType === "touches") {
+			for (const p of instance.GetTouchingParts()) results.push(getInstancePath(p));
+		} else if (connectionType === "joints") {
+			for (const j of instance.GetJoints()) {
+				const joint = j as unknown as JointLike;
+				if (joint.Part0 === instance && joint.Part1) results.push(getInstancePath(joint.Part1));
+				else if (joint.Part1 === instance && joint.Part0) results.push(getInstancePath(joint.Part0));
+			}
+		} else if (connectionType === "welds") {
+			for (const j of instance.GetDescendants()) {
+				if (j.IsA("Weld") || j.IsA("ManualWeld") || j.IsA("WeldConstraint")) {
+					const w = j as unknown as JointLike;
+					if (w.Part0 === instance && w.Part1) results.push(getInstancePath(w.Part1));
+					else if (w.Part1 === instance && w.Part0) results.push(getInstancePath(w.Part0));
+				}
+			}
+		}
+	}
+
+	return { success: true, instancePath, connectionType, count: results.size(), connected: results };
+}
+
+function getOutputLog(requestData: Record<string, unknown>) {
+	const LogService = game.GetService("LogService");
+	const filter = (requestData.filter as string) || "All";
+	const limit = (requestData.limit as number) || 100;
+
+	const logs = LogService.GetLogHistory();
+	const results: Array<{ message: string; messageType: string; timestamp: number }> = [];
+
+	const filterLower = filter.lower();
+	for (let i = math.max(0, logs.size() - limit); i < logs.size(); i++) {
+		const entry = logs[i];
+		const msgType = tostring(entry.messageType).lower();
+
+		if (filterLower !== "all" && msgType !== filterLower) continue;
+
+		results.push({
+			message: entry.message,
+			messageType: tostring(entry.messageType),
+			timestamp: entry.timestamp,
+		});
+	}
+
+	return { success: true, count: results.size(), logs: results };
 }
 
 function grepScripts(requestData: Record<string, unknown>) {
@@ -904,11 +968,6 @@ function managePlaces(data: Record<string, unknown>): unknown {
 			gameId: game.GameId,
 			instanceCount: game.GetDescendants().size(),
 		};
-	} else if (action === "list_places") {
-		return {
-			currentPlace: { name: game.Name, placeId: game.PlaceId },
-			allPlaces: [], // Requires AssetService:GetGamePlacesAsync
-		};
 	}
 	return { error: `Unknown action: ${action}` };
 }
@@ -955,7 +1014,7 @@ function simulatePhysics(data: Record<string, unknown>): unknown {
 	return { error: `Unknown action: ${action}` };
 }
 
-function buildContext(requestData: Record<string, unknown>) {
+function buildContext(requestData: Record<string, unknown>): any {
 	const action = requestData.action as string;
 	const scriptPath = requestData.script_path as string;
 
@@ -990,7 +1049,11 @@ function buildContext(requestData: Record<string, unknown>) {
 
 		let context = `=== SCRIPT CONTEXT: ${scriptPath} ===\n`;
 		context += `ClassName: ${inst.ClassName}\n`;
-		context += `Parent: ${getInstancePath(inst.Parent)}\n\n`;
+		if (inst.Parent) {
+			context += `Parent: ${getInstancePath(inst.Parent)}\n\n`;
+		} else {
+			context += `Parent: nil\n\n`;
+		}
 		context += `--- SOURCE ---\n${readScriptSource(inst)}\n\n`;
 
 		// Dependencies (simplified)
@@ -1024,8 +1087,8 @@ function buildContext(requestData: Record<string, unknown>) {
 		}
 		return { success: true, context };
 	} else if (action === "estimate_tokens") {
-		const fullContext = (buildContext({ action: "get_full_context" }) as { context: string }).context;
-		return { success: true, estimatedTokens: math.ceil(fullContext.size() / 4) }; // Rough estimate
+		const res = buildContext({ action: "get_full_context" }) as { context: string };
+		return { success: true, estimatedTokens: math.ceil((res.context || "").size() / 4) }; // Rough estimate
 	}
 
 	return { error: `Unknown action: ${action}` };
@@ -1042,6 +1105,8 @@ export = {
 	searchByProperty,
 	getClassInfo,
 	getProjectStructure,
+	getConnectedInstances,
+	getOutputLog,
 	grepScripts,
 	validatePathfinding,
 	analyzePerformance,

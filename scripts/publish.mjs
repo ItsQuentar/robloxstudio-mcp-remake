@@ -20,7 +20,7 @@ const version = rootPkg.version;
 // Sync version across all packages
 const packageDirs = [
   'packages/core',
-  'packages/robloxstudio-mcp',
+  'packages/robloxstudio-mcp-remake',
   'packages/robloxstudio-mcp-inspector',
 ];
 
@@ -54,8 +54,8 @@ if (updatedReadme !== readme) {
 console.log('\nBuilding all packages...');
 run('npm run build:all');
 
-console.log('\nPublishing robloxstudio-mcp...');
-run('npm publish -w packages/robloxstudio-mcp');
+console.log('\nPublishing robloxstudio-mcp-remake...');
+run('npm publish -w packages/robloxstudio-mcp-remake');
 
 console.log('\nPublishing robloxstudio-mcp-inspector...');
 run('npm publish -w packages/robloxstudio-mcp-inspector');

@@ -7,7 +7,7 @@ UI.init(plugin);
 const elements = UI.getElements();
 
 
-const toolbar = plugin.CreateToolbar("BoshyXd Remake");
+const toolbar = plugin.CreateToolbar("ItsQuentar Remake");
 const button = toolbar.CreateButton("MCP Remake", "Connect to MCP Server for AI Integration", "rbxassetid://10734944444");
 
 
@@ -32,4 +32,3 @@ plugin.Unloading.Connect(() => {
 
 
 UI.updateUIState();
-Communication.checkForUpdates();
